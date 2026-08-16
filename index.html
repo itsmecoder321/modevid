@@ -19,7 +19,7 @@
         body { background-color: var(--bg-color); color: var(--text-color); display: flex; height: 100vh; overflow: hidden; }
         
         #sidebar {
-            width: 400px; background-color: var(--panel-bg); border-right: 1px solid var(--border-color);
+            width: 420px; background-color: var(--panel-bg); border-right: 1px solid var(--border-color);
             padding: 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; z-index: 10;
         }
         .control-group { display: flex; flex-direction: column; gap: 4px; }
@@ -40,11 +40,13 @@
             color: white; font-weight: bold; cursor: pointer; transition: 0.2s;
         }
         button:hover { background-color: var(--accent-hover); }
-        button:disabled { background-color: var(--border-color); cursor: not-allowed; }
+        button:disabled { background-color: var(--border-color); cursor: not-allowed; opacity: 0.6; }
         #btnRecord { background-color: var(--danger-color); margin-top: 5px; }
+        #btnCenter { background-color: #28a745; margin-top: 5px; }
+        #btnCenter:hover { background-color: #218838; }
         
         #diagnostics { background-color: var(--debug-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; font-size: 0.75em; max-height: 120px; overflow-y: auto; }
-        .success { color: #28a745; } .warning { color: #ffc107; }
+        .success { color: #28a745; font-weight:bold; } .warning { color: #ffc107; font-weight:bold; } .error { color: #dc3545; font-weight:bold; }
         meter { width: 100%; height: 15px; }
         
         #main-content { flex-grow: 1; display: flex; justify-content: center; align-items: center; position: relative; padding: 20px; }
@@ -75,22 +77,23 @@
 
         <div class="panel-section">
             <label style="color: var(--accent-color);">Framing & Positioning</label>
-            <div class="row-group">
-                <div class="control-group" style="flex:1;"><label class="sub-label">Scale</label><input type="range" id="modScale" min="0.1" max="3" step="0.05" value="1"></div>
-                <div class="control-group" style="flex:1;"><label class="sub-label">Up / Down (Y)</label><input type="range" id="modPosY" min="-2" max="2" step="0.05" value="0"></div>
+            <button id="btnCenter" disabled>🎯 Center & Fit Model</button>
+            <div class="row-group" style="margin-top: 5px;">
+                <div class="control-group" style="flex:1;"><label class="sub-label">Scale</label><input type="range" id="modScale" min="0.1" max="5" step="0.05" value="1"></div>
+                <div class="control-group" style="flex:1;"><label class="sub-label">Up / Down</label><input type="range" id="modPosY" min="-5" max="5" step="0.1" value="0"></div>
             </div>
             <div class="row-group">
-                <div class="control-group" style="flex:1;"><label class="sub-label">Left / Right (X)</label><input type="range" id="modPosX" min="-2" max="2" step="0.05" value="0"></div>
-                <div class="control-group" style="flex:1;"><label class="sub-label">Near / Far (Z)</label><input type="range" id="modPosZ" min="-2" max="2" step="0.05" value="0"></div>
+                <div class="control-group" style="flex:1;"><label class="sub-label">Left / Right</label><input type="range" id="modPosX" min="-5" max="5" step="0.1" value="0"></div>
+                <div class="control-group" style="flex:1;"><label class="sub-label">Near / Far</label><input type="range" id="modPosZ" min="-5" max="5" step="0.1" value="0"></div>
             </div>
         </div>
 
         <div class="panel-section">
             <label style="color: var(--accent-color);">Expression & Lip Sync Tuning</label>
-            <label class="sub-label">Mouth Intensity (Fix over-opening or under-opening)</label>
+            <label class="sub-label">Mouth Intensity (Fix over-opening)</label>
             <input type="range" id="mouthAmp" min="0" max="2" step="0.05" value="0.8">
             
-            <label class="sub-label" style="margin-top: 5px;">Arm Posture Corrector (Pitch)</label>
+            <label class="sub-label" style="margin-top: 5px;">Arm Posture Corrector (Fix T-Pose)</label>
             <input type="range" id="armPitch" min="-1.5" max="1.5" step="0.05" value="0">
         </div>
 
@@ -137,8 +140,8 @@
             glb: document.getElementById('glbInput'), audio: document.getElementById('audioInput'),
             bg: document.getElementById('bgColor'), res: document.getElementById('resolution'),
             play: document.getElementById('btnPlayPause'), rec: document.getElementById('btnRecord'),
-            theme: document.getElementById('btnTheme'), container: document.getElementById('canvas-container'),
-            info: document.getElementById('model-info'),
+            centerBtn: document.getElementById('btnCenter'), theme: document.getElementById('btnTheme'),
+            container: document.getElementById('canvas-container'), info: document.getElementById('model-info'),
             pitch: document.getElementById('armPitch'), mouthAmp: document.getElementById('mouthAmp'),
             scale: document.getElementById('modScale'), posX: document.getElementById('modPosX'), 
             posY: document.getElementById('modPosY'), posZ: document.getElementById('modPosZ')
@@ -151,7 +154,8 @@
         const modelGroup = new THREE.Group();
         scene.add(modelGroup);
 
-        const camera = new THREE.PerspectiveCamera(45, state.resolution.w / state.resolution.h, 0.1, 100);
+        // EXTREME VISION CAMERA: Near 0.01, Far 5000 (Prevents clipping on giant/tiny models)
+        const camera = new THREE.PerspectiveCamera(45, state.resolution.w / state.resolution.h, 0.01, 5000);
         const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
         renderer.setSize(state.resolution.w, state.resolution.h);
         renderer.setPixelRatio(1);
@@ -161,13 +165,12 @@
 
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
-        controls.target.set(0, 1.45, 0);
 
         scene.add(new THREE.AmbientLight(0xffffff, 1.2));
         const keyLight = new THREE.DirectionalLight(0xfffaf0, 2.2);
-        keyLight.position.set(2.5, 4, 4); keyLight.castShadow = true;
+        keyLight.position.set(5, 5, 5); keyLight.castShadow = true;
         scene.add(keyLight);
-        scene.add(new THREE.DirectionalLight(0xd0e0ff, 1.0)).position.set(-3, 2, 2);
+        scene.add(new THREE.DirectionalLight(0xd0e0ff, 1.0)).position.set(-5, 3, 3);
 
         let currentModel = null;
         let audioContext, analyser, audioBuffer, mediaStreamDest, dataArray, sourceNode, startTime = 0, pauseTime = 0;
@@ -188,14 +191,54 @@
         ui.res.addEventListener('change', e => { state.resolution = e.target.value === 'landscape' ? {w:1920, h:1080} : {w:1080, h:1920}; resize(); });
         ui.bg.addEventListener('input', e => scene.background.set(e.target.value));
 
-        // --- LOAD MODEL (FIXED) ---
+        // --- AUTO-CENTER ENGINE ---
+        function centerAndFitModel() {
+            if (!currentModel) return;
+
+            // 1. Reset Manual Offsets
+            ui.scale.value = 1; ui.posX.value = 0; ui.posY.value = 0; ui.posZ.value = 0;
+            modelGroup.scale.set(1, 1, 1);
+            modelGroup.position.set(0, 0, 0);
+
+            // 2. Compute exact bounding box
+            const box = new THREE.Box3().setFromObject(currentModel);
+            const size = box.getSize(new THREE.Vector3());
+            const center = box.getCenter(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+
+            if (maxDim === 0) {
+                ui.info.innerHTML = `<span class="error">Model bounds are 0. Cannot compute size.</span>`;
+                return;
+            }
+
+            // 3. Math to move camera back perfectly to fit the object
+            const fov = camera.fov * (Math.PI / 180);
+            let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+            cameraZ *= 1.4; // Add breathing room
+
+            // Position Camera slightly above center (better for characters)
+            camera.position.set(center.x, center.y + (size.y * 0.1), center.z + cameraZ);
+            
+            // Point Camera at the center of the chest/face area
+            controls.target.set(center.x, center.y + (size.y * 0.2), center.z);
+            
+            // Update Camera frustum to ensure it doesn't clip
+            camera.far = cameraZ * 10;
+            camera.updateProjectionMatrix();
+            controls.update();
+
+            console.log("Model Centered. Box Size:", size, "Camera Z:", cameraZ);
+        }
+
+        ui.centerBtn.addEventListener('click', centerAndFitModel);
+
+        // --- LOAD MODEL ---
         ui.glb.addEventListener('change', e => {
             const file = e.target.files[0];
             if (!file) return;
             
-            ui.info.innerHTML = "Loading 3D Model...";
+            ui.info.innerHTML = "Loading & Parsing 3D Model...";
             
-            // Read file properly into the loader
             const url = window.URL.createObjectURL(file);
             new GLTFLoader().load(url, gltf => {
                 if (currentModel) modelGroup.remove(currentModel);
@@ -203,11 +246,15 @@
                 modelGroup.add(currentModel);
                 
                 state.morphMeshes = []; state.bones = {}; state.initialBones = {};
+                let blendshapeCount = 0;
                 
                 currentModel.traverse(node => {
                     if (node.isMesh) {
                         node.castShadow = true;
-                        if (node.morphTargetDictionary) state.morphMeshes.push(node);
+                        if (node.morphTargetDictionary) {
+                            state.morphMeshes.push(node);
+                            blendshapeCount += Object.keys(node.morphTargetDictionary).length;
+                        }
                     }
                     if (node.isBone) {
                         const n = node.name.toLowerCase();
@@ -227,25 +274,20 @@
                     }
                 });
 
-                ui.info.innerHTML = `<span class="success">Model Ready!</span><br>Use sliders to frame perfectly.`;
+                if (blendshapeCount === 0) {
+                    ui.info.innerHTML = `<span class="warning">Model Ready, but 0 Blendshapes found! Lip sync will not work.</span>`;
+                } else {
+                    ui.info.innerHTML = `<span class="success">Model Ready! Found ${blendshapeCount} Blendshapes.</span>`;
+                }
                 
-                // Reset Transforms UI
-                ui.scale.value = 1; ui.posX.value = 0; ui.posY.value = 0; ui.posZ.value = 0;
-                
-                // Auto-center camera base
-                const box = new THREE.Box3().setFromObject(currentModel);
-                const size = box.getSize(new THREE.Vector3());
-                controls.target.set(0, size.y * 0.7, 0);
-                camera.position.set(0, size.y * 0.7, size.y * 1.5);
-                controls.update();
+                ui.centerBtn.disabled = false;
+                centerAndFitModel(); // Auto-center immediately on load
 
                 if(audioBuffer) ui.rec.disabled = false;
-                
-                // Cleanup URL to avoid memory leaks
                 window.URL.revokeObjectURL(url);
             }, undefined, function (error) {
-                console.error(error);
-                ui.info.innerHTML = `<span class="warning">Error loading model. Check console.</span>`;
+                console.error("GLTF Error: ", error);
+                ui.info.innerHTML = `<span class="error">Error loading model. Make sure it is a valid .glb file.</span>`;
             });
         });
 
@@ -285,14 +327,14 @@
         function setMorphUniversal(mesh, searchNames, value, speed = 0.4) {
             if (!mesh.morphTargetDictionary) return;
             const keys = Object.keys(mesh.morphTargetDictionary);
-            
             for (const search of searchNames) {
                 const cleanSearch = cleanName(search);
                 for (const key of keys) {
                     const cleanKey = cleanName(key);
                     if (cleanKey === cleanSearch || cleanKey.includes(cleanSearch)) {
                         const idx = mesh.morphTargetDictionary[key];
-                        mesh.morphTargetInfluences[idx] = THREE.MathUtils.lerp(mesh.morphTargetInfluences[idx], value, speed);
+                        // Clamp value to prevent mesh distortion
+                        mesh.morphTargetInfluences[idx] = THREE.MathUtils.lerp(mesh.morphTargetInfluences[idx], Math.min(value, 1.0), speed);
                         return;
                     }
                 }
@@ -314,7 +356,7 @@
             state.time += delta;
             const t = state.time;
 
-            // Apply manual positioning
+            // Apply manual positioning OVER the auto-centered group
             if (currentModel) {
                 modelGroup.scale.setScalar(parseFloat(ui.scale.value));
                 modelGroup.position.set(parseFloat(ui.posX.value), parseFloat(ui.posY.value), parseFloat(ui.posZ.value));
@@ -335,7 +377,7 @@
             const talk = state.speechEnergy;
             const mouthMax = parseFloat(ui.mouthAmp.value);
 
-            // 1. SACCADES (Eye Movements)
+            // Saccades (Eye Movements)
             if (t > state.nextSaccadeTime) {
                 state.eyeTarget.x = (Math.random() - 0.5) * 0.4;
                 state.eyeTarget.y = (Math.random() - 0.5) * 0.2;
@@ -349,10 +391,7 @@
                 applyAdditiveRotation(state.bones.rEye, state.currentEyePos.y, state.currentEyePos.x, 0);
 
                 if (state.bones.hips) {
-                    const initHips = state.initialBones[state.bones.hips.name];
                     const shiftX = Math.sin(t * 0.4) * 0.015;
-                    const shiftY = Math.abs(Math.sin(t * 0.4)) * 0.005;
-                    state.bones.hips.position.set(initHips.p.x + shiftX, initHips.p.y - shiftY, initHips.p.z);
                     applyAdditiveRotation(state.bones.hips, 0, 0, -shiftX * 2);
                 }
 
@@ -372,10 +411,10 @@
                 applyAdditiveRotation(state.bones.rFore, p * 0.5, 0, 0);
             }
 
-            // 6. UNIVERSAL LIP SYNC
+            // Universal Lip Sync
             state.morphMeshes.forEach(mesh => {
                 if (state.isPlaying) {
-                    const jaw = Math.min(vocalEnergy * 2.5 * mouthMax, 1.0); 
+                    const jaw = vocalEnergy * 2.5 * mouthMax; 
                     setMorphUniversal(mesh, ['jawopen', 'mouthopen', 'visemeaa', 'vrcvaa', 'fclmtha', 'a', 'ah'], jaw, 0.4);
                     setMorphUniversal(mesh, ['mouthfunnel', 'visemeu', 'visemeo', 'vrcvoh', 'fclmtho', 'o', 'u', 'oo', 'pucker'], highEnergy * mouthMax, 0.3);
                     setMorphUniversal(mesh, ['mouthsmileleft', 'mouthsmileright', 'smile', 'fclmthe', 'e', 'ee'], 0.2 + (highEnergy * 0.4), 0.2);
