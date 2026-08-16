@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal 3D Avatar Studio</title>
+    <title>Universal 3D Avatar Studio - Pro Animation</title>
     <style>
         :root {
             --bg-color: #f4f4f9; --panel-bg: #ffffff; --text-color: #333333;
@@ -19,7 +19,7 @@
         body { background-color: var(--bg-color); color: var(--text-color); display: flex; height: 100vh; overflow: hidden; }
         
         #sidebar {
-            width: 420px; background-color: var(--panel-bg); border-right: 1px solid var(--border-color);
+            width: 440px; background-color: var(--panel-bg); border-right: 1px solid var(--border-color);
             padding: 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; z-index: 10;
         }
         .control-group { display: flex; flex-direction: column; gap: 4px; }
@@ -47,7 +47,6 @@
         
         #diagnostics { background-color: var(--debug-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; font-size: 0.75em; max-height: 120px; overflow-y: auto; }
         .success { color: #28a745; font-weight:bold; } .warning { color: #ffc107; font-weight:bold; } .error { color: #dc3545; font-weight:bold; }
-        meter { width: 100%; height: 15px; }
         
         #main-content { flex-grow: 1; display: flex; justify-content: center; align-items: center; position: relative; padding: 20px; }
         #canvas-container { position: relative; background-color: #00ff00; box-shadow: 0 4px 20px rgba(0,0,0,0.25); border-radius: 6px; overflow: hidden; }
@@ -75,6 +74,34 @@
 
         <div id="diagnostics"><div id="model-info">Upload a model to initialize...</div></div>
 
+        <!-- NEW: Dynamic Animation Controls -->
+        <div class="panel-section">
+            <label style="color: var(--accent-color);">Dynamic Animation Controls</label>
+            <div class="control-group">
+                <label class="sub-label">Hand & Arm Gestures (Demonstrating)</label>
+                <input type="range" id="animGestures" min="0" max="3" step="0.1" value="1.2">
+            </div>
+            <div class="row-group">
+                <div class="control-group" style="flex:1;">
+                    <label class="sub-label">Body Sway</label>
+                    <input type="range" id="animSway" min="0" max="3" step="0.1" value="1">
+                </div>
+                <div class="control-group" style="flex:1;">
+                    <label class="sub-label">Head Nodding</label>
+                    <input type="range" id="animHead" min="0" max="3" step="0.1" value="1">
+                </div>
+            </div>
+        </div>
+
+        <!-- Expression & Framing -->
+        <div class="panel-section">
+            <label style="color: var(--accent-color);">Expression & Posture Tuning</label>
+            <label class="sub-label">Mouth Intensity</label>
+            <input type="range" id="mouthAmp" min="0" max="2" step="0.05" value="0.8">
+            <label class="sub-label" style="margin-top: 5px;">Resting Arm Pitch (Fix T-Pose)</label>
+            <input type="range" id="armPitch" min="-1.5" max="1.5" step="0.05" value="0.2">
+        </div>
+
         <div class="panel-section">
             <label style="color: var(--accent-color);">Framing & Positioning</label>
             <button id="btnCenter" disabled>🎯 Center & Fit Model</button>
@@ -86,15 +113,6 @@
                 <div class="control-group" style="flex:1;"><label class="sub-label">Left / Right</label><input type="range" id="modPosX" min="-5" max="5" step="0.1" value="0"></div>
                 <div class="control-group" style="flex:1;"><label class="sub-label">Near / Far</label><input type="range" id="modPosZ" min="-5" max="5" step="0.1" value="0"></div>
             </div>
-        </div>
-
-        <div class="panel-section">
-            <label style="color: var(--accent-color);">Expression & Lip Sync Tuning</label>
-            <label class="sub-label">Mouth Intensity (Fix over-opening)</label>
-            <input type="range" id="mouthAmp" min="0" max="2" step="0.05" value="0.8">
-            
-            <label class="sub-label" style="margin-top: 5px;">Arm Posture Corrector (Fix T-Pose)</label>
-            <input type="range" id="armPitch" min="-1.5" max="1.5" step="0.05" value="0">
         </div>
 
         <div class="control-group">
@@ -127,7 +145,6 @@
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-        // --- STATE ---
         const state = {
             isPlaying: false, isRecording: false, resolution: { w: 1920, h: 1080 },
             morphMeshes: [], bones: {}, initialBones: {},
@@ -135,7 +152,6 @@
             eyeTarget: new THREE.Vector2(0, 0), currentEyePos: new THREE.Vector2(0, 0), nextSaccadeTime: 0,
         };
 
-        // --- UI ---
         const ui = {
             glb: document.getElementById('glbInput'), audio: document.getElementById('audioInput'),
             bg: document.getElementById('bgColor'), res: document.getElementById('resolution'),
@@ -144,17 +160,16 @@
             container: document.getElementById('canvas-container'), info: document.getElementById('model-info'),
             pitch: document.getElementById('armPitch'), mouthAmp: document.getElementById('mouthAmp'),
             scale: document.getElementById('modScale'), posX: document.getElementById('modPosX'), 
-            posY: document.getElementById('modPosY'), posZ: document.getElementById('modPosZ')
+            posY: document.getElementById('modPosY'), posZ: document.getElementById('modPosZ'),
+            animGestures: document.getElementById('animGestures'), animSway: document.getElementById('animSway'),
+            animHead: document.getElementById('animHead')
         };
 
-        // --- THREE.JS SETUP ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(ui.bg.value);
-
         const modelGroup = new THREE.Group();
         scene.add(modelGroup);
 
-        // EXTREME VISION CAMERA: Near 0.01, Far 5000 (Prevents clipping on giant/tiny models)
         const camera = new THREE.PerspectiveCamera(45, state.resolution.w / state.resolution.h, 0.01, 5000);
         const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
         renderer.setSize(state.resolution.w, state.resolution.h);
@@ -172,10 +187,8 @@
         scene.add(keyLight);
         scene.add(new THREE.DirectionalLight(0xd0e0ff, 1.0)).position.set(-5, 3, 3);
 
-        let currentModel = null;
-        let audioContext, analyser, audioBuffer, mediaStreamDest, dataArray, sourceNode, startTime = 0, pauseTime = 0;
+        let currentModel = null, audioContext, analyser, audioBuffer, mediaStreamDest, dataArray, sourceNode, startTime = 0, pauseTime = 0;
 
-        // --- RESIZE LOGIC ---
         function resize() {
             const parent = ui.container.parentElement;
             const aspect = state.resolution.w / state.resolution.h;
@@ -191,52 +204,28 @@
         ui.res.addEventListener('change', e => { state.resolution = e.target.value === 'landscape' ? {w:1920, h:1080} : {w:1080, h:1920}; resize(); });
         ui.bg.addEventListener('input', e => scene.background.set(e.target.value));
 
-        // --- AUTO-CENTER ENGINE ---
         function centerAndFitModel() {
             if (!currentModel) return;
-
-            // 1. Reset Manual Offsets
             ui.scale.value = 1; ui.posX.value = 0; ui.posY.value = 0; ui.posZ.value = 0;
-            modelGroup.scale.set(1, 1, 1);
-            modelGroup.position.set(0, 0, 0);
+            modelGroup.scale.set(1, 1, 1); modelGroup.position.set(0, 0, 0);
 
-            // 2. Compute exact bounding box
             const box = new THREE.Box3().setFromObject(currentModel);
             const size = box.getSize(new THREE.Vector3());
             const center = box.getCenter(new THREE.Vector3());
             const maxDim = Math.max(size.x, size.y, size.z);
+            if (maxDim === 0) return;
 
-            if (maxDim === 0) {
-                ui.info.innerHTML = `<span class="error">Model bounds are 0. Cannot compute size.</span>`;
-                return;
-            }
-
-            // 3. Math to move camera back perfectly to fit the object
             const fov = camera.fov * (Math.PI / 180);
-            let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
-            cameraZ *= 1.4; // Add breathing room
-
-            // Position Camera slightly above center (better for characters)
+            let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.4;
             camera.position.set(center.x, center.y + (size.y * 0.1), center.z + cameraZ);
-            
-            // Point Camera at the center of the chest/face area
             controls.target.set(center.x, center.y + (size.y * 0.2), center.z);
-            
-            // Update Camera frustum to ensure it doesn't clip
-            camera.far = cameraZ * 10;
-            camera.updateProjectionMatrix();
-            controls.update();
-
-            console.log("Model Centered. Box Size:", size, "Camera Z:", cameraZ);
+            camera.far = cameraZ * 10; camera.updateProjectionMatrix(); controls.update();
         }
-
         ui.centerBtn.addEventListener('click', centerAndFitModel);
 
-        // --- LOAD MODEL ---
         ui.glb.addEventListener('change', e => {
             const file = e.target.files[0];
             if (!file) return;
-            
             ui.info.innerHTML = "Loading & Parsing 3D Model...";
             
             const url = window.URL.createObjectURL(file);
@@ -267,6 +256,9 @@
                         else if (n.includes('rightarm') || n.includes('arm_r') || n.includes('upperarm_r')) state.bones.rArm = node;
                         else if (n.includes('leftforearm') || n.includes('forearm_l')) state.bones.lFore = node;
                         else if (n.includes('rightforearm') || n.includes('forearm_r')) state.bones.rFore = node;
+                        // Map Hands/Wrists for Demonstrating
+                        else if (n.includes('lefthand') || n.includes('hand_l')) state.bones.lHand = node;
+                        else if (n.includes('righthand') || n.includes('hand_r')) state.bones.rHand = node;
                         else if (n.includes('lefteye') || n.includes('eye_l')) state.bones.lEye = node;
                         else if (n.includes('righteye') || n.includes('eye_r')) state.bones.rEye = node;
 
@@ -274,31 +266,18 @@
                     }
                 });
 
-                if (blendshapeCount === 0) {
-                    ui.info.innerHTML = `<span class="warning">Model Ready, but 0 Blendshapes found! Lip sync will not work.</span>`;
-                } else {
-                    ui.info.innerHTML = `<span class="success">Model Ready! Found ${blendshapeCount} Blendshapes.</span>`;
-                }
-                
-                ui.centerBtn.disabled = false;
-                centerAndFitModel(); // Auto-center immediately on load
-
+                ui.info.innerHTML = `<span class="success">Model Ready! Found ${blendshapeCount} Blendshapes.</span>`;
+                ui.centerBtn.disabled = false; centerAndFitModel();
                 if(audioBuffer) ui.rec.disabled = false;
                 window.URL.revokeObjectURL(url);
-            }, undefined, function (error) {
-                console.error("GLTF Error: ", error);
-                ui.info.innerHTML = `<span class="error">Error loading model. Make sure it is a valid .glb file.</span>`;
             });
         });
 
-        // --- LOAD AUDIO ---
         ui.audio.addEventListener('change', async e => {
-            if (!e.target.files[0]) return;
             const arrayBuffer = await e.target.files[0].arrayBuffer();
             if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
             audioContext.decodeAudioData(arrayBuffer, buffer => {
-                audioBuffer = buffer;
-                analyser = audioContext.createAnalyser();
+                audioBuffer = buffer; analyser = audioContext.createAnalyser();
                 analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.7;
                 dataArray = new Uint8Array(analyser.frequencyBinCount);
                 mediaStreamDest = audioContext.createMediaStreamDestination();
@@ -321,9 +300,7 @@
             }
         });
 
-        // --- UNIVERSAL MORPH TARGET MATCHER ---
         function cleanName(n) { return n.toLowerCase().replace(/[^a-z0-9]/g, ''); }
-
         function setMorphUniversal(mesh, searchNames, value, speed = 0.4) {
             if (!mesh.morphTargetDictionary) return;
             const keys = Object.keys(mesh.morphTargetDictionary);
@@ -333,7 +310,6 @@
                     const cleanKey = cleanName(key);
                     if (cleanKey === cleanSearch || cleanKey.includes(cleanSearch)) {
                         const idx = mesh.morphTargetDictionary[key];
-                        // Clamp value to prevent mesh distortion
                         mesh.morphTargetInfluences[idx] = THREE.MathUtils.lerp(mesh.morphTargetInfluences[idx], Math.min(value, 1.0), speed);
                         return;
                     }
@@ -347,7 +323,6 @@
             bone.quaternion.copy(state.initialBones[bone.name].q).multiply(offsetQ);
         }
 
-        // --- RENDER LOOP ---
         const clock = new THREE.Clock();
 
         function animate() {
@@ -356,7 +331,6 @@
             state.time += delta;
             const t = state.time;
 
-            // Apply manual positioning OVER the auto-centered group
             if (currentModel) {
                 modelGroup.scale.setScalar(parseFloat(ui.scale.value));
                 modelGroup.position.set(parseFloat(ui.posX.value), parseFloat(ui.posY.value), parseFloat(ui.posZ.value));
@@ -376,8 +350,12 @@
 
             const talk = state.speechEnergy;
             const mouthMax = parseFloat(ui.mouthAmp.value);
+            
+            // UI Multipliers
+            const gestAmp = parseFloat(ui.animGestures.value);
+            const swayAmp = parseFloat(ui.animSway.value);
+            const headAmp = parseFloat(ui.animHead.value);
 
-            // Saccades (Eye Movements)
             if (t > state.nextSaccadeTime) {
                 state.eyeTarget.x = (Math.random() - 0.5) * 0.4;
                 state.eyeTarget.y = (Math.random() - 0.5) * 0.2;
@@ -391,27 +369,41 @@
                 applyAdditiveRotation(state.bones.rEye, state.currentEyePos.y, state.currentEyePos.x, 0);
 
                 if (state.bones.hips) {
-                    const shiftX = Math.sin(t * 0.4) * 0.015;
+                    const shiftX = Math.sin(t * 0.4) * 0.015 * swayAmp;
                     applyAdditiveRotation(state.bones.hips, 0, 0, -shiftX * 2);
                 }
 
-                const breath = Math.sin(t * 1.8) * 0.015;
-                const swayX = Math.sin(t * 0.4) * 0.03;
+                const breath = Math.sin(t * 1.8) * 0.015 * swayAmp;
+                const swayX = Math.sin(t * 0.4) * 0.03 * swayAmp;
                 applyAdditiveRotation(state.bones.spine, breath, 0, swayX);
                 applyAdditiveRotation(state.bones.chest, breath * 1.5, 0, swayX * 0.5);
 
-                const nod = (Math.sin(t * 3) * 0.03 * talk) + (breath * 0.5);
+                const nod = ((Math.sin(t * 3) * 0.03 * talk) + (breath * 0.5)) * headAmp;
                 applyAdditiveRotation(state.bones.neck, nod + state.currentEyePos.y * 0.2, state.currentEyePos.x * 0.3, -swayX);
                 applyAdditiveRotation(state.bones.head, nod + state.currentEyePos.y * 0.3, state.currentEyePos.x * 0.4, 0);
 
+                // DEMONSTRATING ARMS MATH
                 const p = parseFloat(ui.pitch.value);
-                applyAdditiveRotation(state.bones.lArm, p + (Math.sin(t * 2.2) * 0.08 * talk), 0, (Math.sin(t * 1.5) * 0.08 * talk));
-                applyAdditiveRotation(state.bones.lFore, p * 0.5, 0, 0);
-                applyAdditiveRotation(state.bones.rArm, p + (Math.cos(t * 1.9) * 0.08 * talk), 0, -(Math.cos(t * 1.3) * 0.08 * talk));
-                applyAdditiveRotation(state.bones.rFore, p * 0.5, 0, 0);
+                // When talking, lift arms up and bend elbows outward to explain/demonstrate
+                const demoLift = talk * 0.6 * gestAmp; 
+
+                // Left Arm & Hand
+                const lArmPitch = p + (Math.sin(t * 2.2) * 0.08 * talk * gestAmp) + (demoLift * 0.7);
+                const lArmRoll = (Math.sin(t * 1.5) * 0.08 * talk * gestAmp) + (demoLift * 0.4);
+                const lForePitch = (p * 0.5) + (demoLift * 1.4) + (Math.sin(t * 3.1) * 0.1 * talk * gestAmp);
+                applyAdditiveRotation(state.bones.lArm, lArmPitch, 0, lArmRoll);
+                applyAdditiveRotation(state.bones.lFore, lForePitch, 0, 0);
+                applyAdditiveRotation(state.bones.lHand, demoLift * 0.3, 0, Math.sin(t * 4) * 0.1 * talk * gestAmp); // Expressive wrist
+
+                // Right Arm & Hand
+                const rArmPitch = p + (Math.cos(t * 1.9) * 0.08 * talk * gestAmp) + (demoLift * 0.7);
+                const rArmRoll = -(Math.cos(t * 1.3) * 0.08 * talk * gestAmp) - (demoLift * 0.4);
+                const rForePitch = (p * 0.5) + (demoLift * 1.4) + (Math.cos(t * 2.8) * 0.1 * talk * gestAmp);
+                applyAdditiveRotation(state.bones.rArm, rArmPitch, 0, rArmRoll);
+                applyAdditiveRotation(state.bones.rFore, rForePitch, 0, 0);
+                applyAdditiveRotation(state.bones.rHand, demoLift * 0.3, 0, Math.cos(t * 4) * 0.1 * talk * gestAmp); // Expressive wrist
             }
 
-            // Universal Lip Sync
             state.morphMeshes.forEach(mesh => {
                 if (state.isPlaying) {
                     const jaw = vocalEnergy * 2.5 * mouthMax; 
@@ -427,12 +419,10 @@
                 setMorphUniversal(mesh, ['eyeblinkleft', 'eyeblinkright', 'blink', 'fcleyeclose'], 0, 0.15); 
             });
 
-            controls.update();
-            renderer.render(scene, camera);
+            controls.update(); renderer.render(scene, camera);
         }
         animate();
 
-        // --- EXPORT ---
         let mediaRecorder, chunks = [];
         ui.rec.addEventListener('click', () => state.isRecording ? stopRecording() : startRecording());
 
