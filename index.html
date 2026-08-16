@@ -73,7 +73,6 @@
 
         <div id="diagnostics"><div id="model-info">Upload a model to initialize...</div></div>
 
-        <!-- NEW: Positioning & Framing Controls -->
         <div class="panel-section">
             <label style="color: var(--accent-color);">Framing & Positioning</label>
             <div class="row-group">
@@ -86,7 +85,6 @@
             </div>
         </div>
 
-        <!-- UPDATED: Lip Sync Tuning -->
         <div class="panel-section">
             <label style="color: var(--accent-color);">Expression & Lip Sync Tuning</label>
             <label class="sub-label">Mouth Intensity (Fix over-opening or under-opening)</label>
@@ -150,7 +148,6 @@
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(ui.bg.value);
 
-        // A wrapper group so we can move the model without breaking animations
         const modelGroup = new THREE.Group();
         scene.add(modelGroup);
 
@@ -191,10 +188,16 @@
         ui.res.addEventListener('change', e => { state.resolution = e.target.value === 'landscape' ? {w:1920, h:1080} : {w:1080, h:1920}; resize(); });
         ui.bg.addEventListener('input', e => scene.background.set(e.target.value));
 
-        // --- LOAD MODEL ---
+        // --- LOAD MODEL (FIXED) ---
         ui.glb.addEventListener('change', e => {
-            if (!e.target.files[0]) return;
-            new GLTFLoader().parse(window.URL.createObjectURL(e.target.files[0]), '', gltf => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            ui.info.innerHTML = "Loading 3D Model...";
+            
+            // Read file properly into the loader
+            const url = window.URL.createObjectURL(file);
+            new GLTFLoader().load(url, gltf => {
                 if (currentModel) modelGroup.remove(currentModel);
                 currentModel = gltf.scene;
                 modelGroup.add(currentModel);
@@ -224,7 +227,7 @@
                     }
                 });
 
-                ui.info.innerHTML = `<span class="success">Model Ready!</span><br>Resetting position sliders...`;
+                ui.info.innerHTML = `<span class="success">Model Ready!</span><br>Use sliders to frame perfectly.`;
                 
                 // Reset Transforms UI
                 ui.scale.value = 1; ui.posX.value = 0; ui.posY.value = 0; ui.posZ.value = 0;
@@ -237,6 +240,12 @@
                 controls.update();
 
                 if(audioBuffer) ui.rec.disabled = false;
+                
+                // Cleanup URL to avoid memory leaks
+                window.URL.revokeObjectURL(url);
+            }, undefined, function (error) {
+                console.error(error);
+                ui.info.innerHTML = `<span class="warning">Error loading model. Check console.</span>`;
             });
         });
 
@@ -271,7 +280,6 @@
         });
 
         // --- UNIVERSAL MORPH TARGET MATCHER ---
-        // Cleans strings of underscores/caps (e.g. "Fcl_MTH_A" -> "fclmtha", "jaw_open" -> "jawopen")
         function cleanName(n) { return n.toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
         function setMorphUniversal(mesh, searchNames, value, speed = 0.4) {
@@ -282,11 +290,10 @@
                 const cleanSearch = cleanName(search);
                 for (const key of keys) {
                     const cleanKey = cleanName(key);
-                    // Match exactly or if it clearly contains the key (like "viseme_aa")
                     if (cleanKey === cleanSearch || cleanKey.includes(cleanSearch)) {
                         const idx = mesh.morphTargetDictionary[key];
                         mesh.morphTargetInfluences[idx] = THREE.MathUtils.lerp(mesh.morphTargetInfluences[idx], value, speed);
-                        return; // Found a match, stop looking
+                        return;
                     }
                 }
             }
@@ -307,7 +314,7 @@
             state.time += delta;
             const t = state.time;
 
-            // Apply manual positioning to wrapper group
+            // Apply manual positioning
             if (currentModel) {
                 modelGroup.scale.setScalar(parseFloat(ui.scale.value));
                 modelGroup.position.set(parseFloat(ui.posX.value), parseFloat(ui.posY.value), parseFloat(ui.posZ.value));
@@ -326,7 +333,7 @@
             }
 
             const talk = state.speechEnergy;
-            const mouthMax = parseFloat(ui.mouthAmp.value); // Grab user's max jaw allowance
+            const mouthMax = parseFloat(ui.mouthAmp.value);
 
             // 1. SACCADES (Eye Movements)
             if (t > state.nextSaccadeTime) {
@@ -341,7 +348,6 @@
                 applyAdditiveRotation(state.bones.lEye, state.currentEyePos.y, state.currentEyePos.x, 0);
                 applyAdditiveRotation(state.bones.rEye, state.currentEyePos.y, state.currentEyePos.x, 0);
 
-                // Body Posture
                 if (state.bones.hips) {
                     const initHips = state.initialBones[state.bones.hips.name];
                     const shiftX = Math.sin(t * 0.4) * 0.015;
@@ -359,7 +365,6 @@
                 applyAdditiveRotation(state.bones.neck, nod + state.currentEyePos.y * 0.2, state.currentEyePos.x * 0.3, -swayX);
                 applyAdditiveRotation(state.bones.head, nod + state.currentEyePos.y * 0.3, state.currentEyePos.x * 0.4, 0);
 
-                // Arms
                 const p = parseFloat(ui.pitch.value);
                 applyAdditiveRotation(state.bones.lArm, p + (Math.sin(t * 2.2) * 0.08 * talk), 0, (Math.sin(t * 1.5) * 0.08 * talk));
                 applyAdditiveRotation(state.bones.lFore, p * 0.5, 0, 0);
@@ -370,10 +375,7 @@
             // 6. UNIVERSAL LIP SYNC
             state.morphMeshes.forEach(mesh => {
                 if (state.isPlaying) {
-                    // Apply Intensity Multiplier to Jaw
                     const jaw = Math.min(vocalEnergy * 2.5 * mouthMax, 1.0); 
-                    
-                    // Comprehensive dictionaries for ARKit, VRM, Reallusion, and Mixamo
                     setMorphUniversal(mesh, ['jawopen', 'mouthopen', 'visemeaa', 'vrcvaa', 'fclmtha', 'a', 'ah'], jaw, 0.4);
                     setMorphUniversal(mesh, ['mouthfunnel', 'visemeu', 'visemeo', 'vrcvoh', 'fclmtho', 'o', 'u', 'oo', 'pucker'], highEnergy * mouthMax, 0.3);
                     setMorphUniversal(mesh, ['mouthsmileleft', 'mouthsmileright', 'smile', 'fclmthe', 'e', 'ee'], 0.2 + (highEnergy * 0.4), 0.2);
@@ -383,7 +385,7 @@
                     setMorphUniversal(mesh, ['mouthsmileleft', 'mouthsmileright', 'smile', 'fclmthe', 'e', 'ee'], 0.05, 0.1);
                     setMorphUniversal(mesh, ['browinnerup', 'browouterup', 'browsup', 'surprised'], 0, 0.1);
                 }
-                setMorphUniversal(mesh, ['eyeblinkleft', 'eyeblinkright', 'blink', 'fcleyeclose'], 0, 0.15); // Auto-recover blink
+                setMorphUniversal(mesh, ['eyeblinkleft', 'eyeblinkright', 'blink', 'fcleyeclose'], 0, 0.15); 
             });
 
             controls.update();
