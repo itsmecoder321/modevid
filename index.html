@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal 3D Avatar Studio - Pro Animation</title>
+    <title>Pro Explainer Avatar Studio</title>
     <style>
         :root {
             --bg-color: #f4f4f9; --panel-bg: #ffffff; --text-color: #333333;
@@ -24,7 +24,10 @@
         }
         .control-group { display: flex; flex-direction: column; gap: 4px; }
         .row-group { display: flex; gap: 10px; align-items: center; }
-        .panel-section { background: var(--section-bg); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 8px; }
+        
+        details { background: var(--section-bg); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 5px; }
+        summary { font-weight: bold; cursor: pointer; color: var(--accent-color); outline: none; user-select: none; }
+        .details-content { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
         
         label { font-size: 0.85em; font-weight: bold; }
         .sub-label { font-size: 0.75em; color: gray; font-weight: normal; margin-top:-3px; }
@@ -41,7 +44,7 @@
         }
         button:hover { background-color: var(--accent-hover); }
         button:disabled { background-color: var(--border-color); cursor: not-allowed; opacity: 0.6; }
-        #btnRecord { background-color: var(--danger-color); margin-top: 5px; }
+        #btnRecord { background-color: var(--danger-color); }
         #btnCenter { background-color: #28a745; margin-top: 5px; }
         #btnCenter:hover { background-color: #218838; }
         
@@ -65,57 +68,79 @@
 <body data-theme="dark">
 
     <div id="sidebar">
-        <h2 style="font-size: 1.2em; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">Universal Avatar Studio</h2>
+        <h2 style="font-size: 1.2em; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">Pro Explainer Studio</h2>
         
         <div class="control-group">
             <label>1. Load 3D Model (.glb)</label>
             <input type="file" id="glbInput" accept=".glb">
         </div>
-
         <div id="diagnostics"><div id="model-info">Upload a model to initialize...</div></div>
 
-        <!-- NEW: Dynamic Animation Controls -->
-        <div class="panel-section">
-            <label style="color: var(--accent-color);">Dynamic Animation Controls</label>
-            <div class="control-group">
-                <label class="sub-label">Hand & Arm Gestures (Demonstrating)</label>
-                <input type="range" id="animGestures" min="0" max="3" step="0.1" value="1.2">
-            </div>
-            <div class="row-group">
-                <div class="control-group" style="flex:1;">
-                    <label class="sub-label">Body Sway</label>
-                    <input type="range" id="animSway" min="0" max="3" step="0.1" value="1">
+        <!-- 1. Positioning -->
+        <details>
+            <summary>🎯 Framing & Positioning</summary>
+            <div class="details-content">
+                <button id="btnCenter" disabled>Auto Center & Fit Model</button>
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Scale</label><input type="range" id="modScale" min="0.1" max="5" step="0.05" value="1"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Up / Down</label><input type="range" id="modPosY" min="-5" max="5" step="0.1" value="0"></div>
                 </div>
-                <div class="control-group" style="flex:1;">
-                    <label class="sub-label">Head Nodding</label>
-                    <input type="range" id="animHead" min="0" max="3" step="0.1" value="1">
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Left / Right</label><input type="range" id="modPosX" min="-5" max="5" step="0.1" value="0"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Near / Far</label><input type="range" id="modPosZ" min="-5" max="5" step="0.1" value="0"></div>
                 </div>
             </div>
-        </div>
+        </details>
 
-        <!-- Expression & Framing -->
-        <div class="panel-section">
-            <label style="color: var(--accent-color);">Expression & Posture Tuning</label>
-            <label class="sub-label">Mouth Intensity</label>
-            <input type="range" id="mouthAmp" min="0" max="2" step="0.05" value="0.8">
-            <label class="sub-label" style="margin-top: 5px;">Resting Arm Pitch (Fix T-Pose)</label>
-            <input type="range" id="armPitch" min="-1.5" max="1.5" step="0.05" value="0.2">
-        </div>
-
-        <div class="panel-section">
-            <label style="color: var(--accent-color);">Framing & Positioning</label>
-            <button id="btnCenter" disabled>🎯 Center & Fit Model</button>
-            <div class="row-group" style="margin-top: 5px;">
-                <div class="control-group" style="flex:1;"><label class="sub-label">Scale</label><input type="range" id="modScale" min="0.1" max="5" step="0.05" value="1"></div>
-                <div class="control-group" style="flex:1;"><label class="sub-label">Up / Down</label><input type="range" id="modPosY" min="-5" max="5" step="0.1" value="0"></div>
+        <!-- 2. Explainer Behavior -->
+        <details open>
+            <summary>🗣️ Explainer Animations</summary>
+            <div class="details-content">
+                <label class="sub-label">Explanatory Hand Gestures (Chest Lift & Chop)</label>
+                <input type="range" id="animGestures" min="0" max="3" step="0.1" value="1.0">
+                
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;">
+                        <label class="sub-label">Body Sway</label>
+                        <input type="range" id="animSway" min="0" max="3" step="0.1" value="1">
+                    </div>
+                    <div class="control-group" style="flex:1;">
+                        <label class="sub-label">Head Nodding</label>
+                        <input type="range" id="animHead" min="0" max="3" step="0.1" value="1">
+                    </div>
+                </div>
+                <label class="sub-label" style="margin-top: 5px;">Mouth Intensity</label>
+                <input type="range" id="mouthAmp" min="0" max="2" step="0.05" value="0.8">
             </div>
-            <div class="row-group">
-                <div class="control-group" style="flex:1;"><label class="sub-label">Left / Right</label><input type="range" id="modPosX" min="-5" max="5" step="0.1" value="0"></div>
-                <div class="control-group" style="flex:1;"><label class="sub-label">Near / Far</label><input type="range" id="modPosZ" min="-5" max="5" step="0.1" value="0"></div>
-            </div>
-        </div>
+        </details>
 
-        <div class="control-group">
+        <!-- 3. Manual Rig Control -->
+        <details>
+            <summary>🦾 Manual Rig Overrides</summary>
+            <div class="details-content">
+                <span style="font-size:0.7em; color:gray;">Use these to set the perfect "resting" pose. The explanatory animations will layer smoothly on top of these settings. (Symmetrical)</span>
+                
+                <label class="sub-label" style="color:var(--text-color); font-weight:bold; margin-top:5px;">Upper Arms</label>
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Pitch (Fwd/Back)</label><input type="range" id="bArmP" min="-2" max="2" step="0.05" value="0.2"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Roll (Out/In)</label><input type="range" id="bArmR" min="-2" max="2" step="0.05" value="0"></div>
+                </div>
+
+                <label class="sub-label" style="color:var(--text-color); font-weight:bold; margin-top:5px;">Elbows / Forearms</label>
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Bend (Pitch)</label><input type="range" id="bForeP" min="-2.5" max="2.5" step="0.05" value="0"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Twist (Yaw)</label><input type="range" id="bForeY" min="-2" max="2" step="0.05" value="0"></div>
+                </div>
+
+                <label class="sub-label" style="color:var(--text-color); font-weight:bold; margin-top:5px;">Wrists / Hands</label>
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Flex (Pitch)</label><input type="range" id="bHandP" min="-1.5" max="1.5" step="0.05" value="0"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Wave (Roll)</label><input type="range" id="bHandR" min="-1.5" max="1.5" step="0.05" value="0"></div>
+                </div>
+            </div>
+        </details>
+
+        <div class="control-group" style="margin-top: 10px;">
             <label>2. Load Audio Speech</label>
             <input type="file" id="audioInput" accept="audio/*">
         </div>
@@ -148,7 +173,7 @@
         const state = {
             isPlaying: false, isRecording: false, resolution: { w: 1920, h: 1080 },
             morphMeshes: [], bones: {}, initialBones: {},
-            time: 0, speechEnergy: 0,
+            time: 0, speechEnergy: 0, gestureActiveState: 0, // 0 = resting, 1 = explaining
             eyeTarget: new THREE.Vector2(0, 0), currentEyePos: new THREE.Vector2(0, 0), nextSaccadeTime: 0,
         };
 
@@ -158,11 +183,13 @@
             play: document.getElementById('btnPlayPause'), rec: document.getElementById('btnRecord'),
             centerBtn: document.getElementById('btnCenter'), theme: document.getElementById('btnTheme'),
             container: document.getElementById('canvas-container'), info: document.getElementById('model-info'),
-            pitch: document.getElementById('armPitch'), mouthAmp: document.getElementById('mouthAmp'),
-            scale: document.getElementById('modScale'), posX: document.getElementById('modPosX'), 
-            posY: document.getElementById('modPosY'), posZ: document.getElementById('modPosZ'),
-            animGestures: document.getElementById('animGestures'), animSway: document.getElementById('animSway'),
-            animHead: document.getElementById('animHead')
+            mouthAmp: document.getElementById('mouthAmp'), animGestures: document.getElementById('animGestures'), 
+            animSway: document.getElementById('animSway'), animHead: document.getElementById('animHead'),
+            scale: document.getElementById('modScale'), posX: document.getElementById('modPosX'), posY: document.getElementById('modPosY'), posZ: document.getElementById('modPosZ'),
+            // Rig Overrides
+            bArmP: document.getElementById('bArmP'), bArmR: document.getElementById('bArmR'),
+            bForeP: document.getElementById('bForeP'), bForeY: document.getElementById('bForeY'),
+            bHandP: document.getElementById('bHandP'), bHandR: document.getElementById('bHandR')
         };
 
         const scene = new THREE.Scene();
@@ -256,7 +283,6 @@
                         else if (n.includes('rightarm') || n.includes('arm_r') || n.includes('upperarm_r')) state.bones.rArm = node;
                         else if (n.includes('leftforearm') || n.includes('forearm_l')) state.bones.lFore = node;
                         else if (n.includes('rightforearm') || n.includes('forearm_r')) state.bones.rFore = node;
-                        // Map Hands/Wrists for Demonstrating
                         else if (n.includes('lefthand') || n.includes('hand_l')) state.bones.lHand = node;
                         else if (n.includes('righthand') || n.includes('hand_r')) state.bones.rHand = node;
                         else if (n.includes('lefteye') || n.includes('eye_l')) state.bones.lEye = node;
@@ -278,7 +304,7 @@
             if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
             audioContext.decodeAudioData(arrayBuffer, buffer => {
                 audioBuffer = buffer; analyser = audioContext.createAnalyser();
-                analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.7;
+                analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.6; // Slightly faster reaction for sharp sounds
                 dataArray = new Uint8Array(analyser.frequencyBinCount);
                 mediaStreamDest = audioContext.createMediaStreamDestination();
                 ui.play.disabled = false; if(currentModel) ui.rec.disabled = false;
@@ -343,7 +369,7 @@
                 vocalEnergy = (vocalEnergy / 18) / 255;
                 for (let i = 20; i < 60; i++) highEnergy += dataArray[i];
                 highEnergy = (highEnergy / 40) / 255;
-                state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, vocalEnergy, 0.15);
+                state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, vocalEnergy, 0.2);
             } else {
                 state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, 0, 0.1);
             }
@@ -351,10 +377,16 @@
             const talk = state.speechEnergy;
             const mouthMax = parseFloat(ui.mouthAmp.value);
             
-            // UI Multipliers
             const gestAmp = parseFloat(ui.animGestures.value);
             const swayAmp = parseFloat(ui.animSway.value);
             const headAmp = parseFloat(ui.animHead.value);
+
+            // Explainer State Logic (Smoothly raise hands when talking starts, lower when quiet)
+            if (talk > 0.05) {
+                state.gestureActiveState = THREE.MathUtils.lerp(state.gestureActiveState, 1.0, 0.05); // Smooth raise
+            } else {
+                state.gestureActiveState = THREE.MathUtils.lerp(state.gestureActiveState, 0.0, 0.02); // Slower drop
+            }
 
             if (t > state.nextSaccadeTime) {
                 state.eyeTarget.x = (Math.random() - 0.5) * 0.4;
@@ -382,28 +414,40 @@
                 applyAdditiveRotation(state.bones.neck, nod + state.currentEyePos.y * 0.2, state.currentEyePos.x * 0.3, -swayX);
                 applyAdditiveRotation(state.bones.head, nod + state.currentEyePos.y * 0.3, state.currentEyePos.x * 0.4, 0);
 
-                // DEMONSTRATING ARMS MATH
-                const p = parseFloat(ui.pitch.value);
-                // When talking, lift arms up and bend elbows outward to explain/demonstrate
-                const demoLift = talk * 0.6 * gestAmp; 
+                // --- PRO EXPLAINER ARM LOGIC ---
+                // Base Manual Overrides
+                const bArmP = parseFloat(ui.bArmP.value); const bArmR = parseFloat(ui.bArmR.value);
+                const bForeP = parseFloat(ui.bForeP.value); const bForeY = parseFloat(ui.bForeY.value);
+                const bHandP = parseFloat(ui.bHandP.value); const bHandR = parseFloat(ui.bHandR.value);
 
-                // Left Arm & Hand
-                const lArmPitch = p + (Math.sin(t * 2.2) * 0.08 * talk * gestAmp) + (demoLift * 0.7);
-                const lArmRoll = (Math.sin(t * 1.5) * 0.08 * talk * gestAmp) + (demoLift * 0.4);
-                const lForePitch = (p * 0.5) + (demoLift * 1.4) + (Math.sin(t * 3.1) * 0.1 * talk * gestAmp);
-                applyAdditiveRotation(state.bones.lArm, lArmPitch, 0, lArmRoll);
-                applyAdditiveRotation(state.bones.lFore, lForePitch, 0, 0);
-                applyAdditiveRotation(state.bones.lHand, demoLift * 0.3, 0, Math.sin(t * 4) * 0.1 * talk * gestAmp); // Expressive wrist
+                // Explainer Lift Math
+                const lift = state.gestureActiveState * gestAmp;
+                const chop = Math.sin(t * 4) * talk * 0.15 * gestAmp; // Hand emphasis on syllables
 
-                // Right Arm & Hand
-                const rArmPitch = p + (Math.cos(t * 1.9) * 0.08 * talk * gestAmp) + (demoLift * 0.7);
-                const rArmRoll = -(Math.cos(t * 1.3) * 0.08 * talk * gestAmp) - (demoLift * 0.4);
-                const rForePitch = (p * 0.5) + (demoLift * 1.4) + (Math.cos(t * 2.8) * 0.1 * talk * gestAmp);
-                applyAdditiveRotation(state.bones.rArm, rArmPitch, 0, rArmRoll);
-                applyAdditiveRotation(state.bones.rFore, rForePitch, 0, 0);
-                applyAdditiveRotation(state.bones.rHand, demoLift * 0.3, 0, Math.cos(t * 4) * 0.1 * talk * gestAmp); // Expressive wrist
+                // Left Arm
+                const lArmP = bArmP + (Math.sin(t * 1.2) * 0.05 * talk * gestAmp) + (lift * 0.2); // slight lift of shoulder
+                const lArmR = bArmR + (lift * 0.2); // open arm outward slightly to make chest room
+                const lForeP = bForeP + (lift * 1.2) + chop; // Bring hand up to chest + chop
+                const lForeY = bForeY + (lift * 0.3); // Turn palm inward/upward
+                const lHandP = bHandP - (lift * 0.2) + (Math.sin(t * 5) * talk * 0.05); // extend wrist open
+
+                applyAdditiveRotation(state.bones.lArm, lArmP, 0, lArmR);
+                applyAdditiveRotation(state.bones.lFore, lForeP, lForeY, 0);
+                applyAdditiveRotation(state.bones.lHand, lHandP, 0, bHandR);
+
+                // Right Arm (Asymmetrical/Mirrored)
+                const rArmP = bArmP + (Math.cos(t * 1.5) * 0.05 * talk * gestAmp) + (lift * 0.2);
+                const rArmR = -bArmR - (lift * 0.2); // Negative for mirror
+                const rForeP = bForeP + (lift * 1.2) + (Math.cos(t * 4) * talk * 0.15 * gestAmp); // Asymmetrical chop
+                const rForeY = -bForeY - (lift * 0.3);
+                const rHandP = bHandP - (lift * 0.2) + (Math.cos(t * 5) * talk * 0.05);
+
+                applyAdditiveRotation(state.bones.rArm, rArmP, 0, rArmR);
+                applyAdditiveRotation(state.bones.rFore, rForeP, rForeY, 0);
+                applyAdditiveRotation(state.bones.rHand, rHandP, 0, -bHandR);
             }
 
+            // Universal Lip Sync
             state.morphMeshes.forEach(mesh => {
                 if (state.isPlaying) {
                     const jaw = vocalEnergy * 2.5 * mouthMax; 
@@ -423,6 +467,7 @@
         }
         animate();
 
+        // --- EXPORT ---
         let mediaRecorder, chunks = [];
         ui.rec.addEventListener('click', () => state.isRecording ? stopRecording() : startRecording());
 
