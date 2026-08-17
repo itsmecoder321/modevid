@@ -537,12 +537,8 @@
 
             if (state.editingBlockId) closePoseEditor();
 
-            // IMPORTANT: The animation/timeline clock is independent from
-            // HTMLMediaElement's coarse timeupdate events. Audio is synced to it.
-            state.playBaseTime = state.audioTime;
-            state.timelineClock = state.playBaseTime;
-            state.playEpoch = performance.now();
-            state.audioSyncLast = 0;
+            // Seed the delta-accumulator (see animate()) with the current position.
+            state.timelineClock = state.audioTime;
             state.isPlaying = true;
             ui.play.innerText = 'Pause Timeline';
 
@@ -573,7 +569,6 @@
             if (resetPosition) {
                 state.audioTime = 0;
                 state.timelineClock = 0;
-                state.playBaseTime = 0;
                 try { audioElement.currentTime = 0; } catch (e) {}
                 applyTimelinePoseInstant(0);
             }
@@ -911,21 +906,16 @@
             // DETERMINISTIC MASTER TIMELINE CLOCK
             // ========================================================
             if (state.isPlaying) {
-                const elapsed = (performance.now() - state.playEpoch) / 1000;
+                // Use the SAME mechanism as state.time (which you've confirmed animates fine
+                // when paused): plain per-frame delta accumulation. No performance.now() epoch
+                // math, no dependency on duration being correct on any given frame. This cannot
+                // stall unless the rAF loop itself stalls (which would freeze everything, not
+                // just the pose system).
+                state.timelineClock += delta;
                 const duration = getTimelineDuration();
-
-                // BUGFIX: this used to be `state.audioTime = Math.min(state.timelineClock, duration)`
-                // unconditionally. If getTimelineDuration() ever briefly reported 0 (e.g. audio
-                // metadata not fully settled, or a race on the very first frames of playback),
-                // audioTime got clamped to 0 forever -> every pose/breath/lipsync calc that reads
-                // audioTime froze solid, which is exactly the "statue during play" symptom. The
-                // timeline clock itself (wall-time based) must NEVER be clamped by a possibly-stale
-                // duration value; only the audio-element sync / stop-condition should use duration.
-                state.timelineClock = state.playBaseTime + elapsed;
                 state.audioTime = duration > 0 ? Math.min(state.timelineClock, duration) : state.timelineClock;
 
                 // Keep real audio aligned to our animation clock.
-                // Widened threshold + readyState check so this never fights a mid-seek audio element.
                 if (audioElement.src && audioElement.readyState >= 2 && !audioElement.seeking) {
                     if (Math.abs(audioElement.currentTime - state.audioTime) > 0.25) {
                         try { audioElement.currentTime = state.audioTime; } catch (e) {}
@@ -1056,6 +1046,20 @@
                 setMorphUniversal(mesh, ['eyeblinkright', 'blinkright', 'eyecloseright'], state.isBlinkingNow, 0.8); 
                 setMorphUniversal(mesh, ['blink', 'fcleyeclose', 'eyesclosed'], state.isBlinkingNow, 0.8); 
             });
+
+            // Live debug readout — if it's still a statue during play, check this line:
+            // if "clock" is not counting up, the rAF loop itself is stalled (not a pose bug).
+            // if "clock" counts up but "pose" values never change, the block/pose lookup is the issue.
+            if (ui.info) {
+                const dbg = document.getElementById('liveDebug') || (() => {
+                    const d = document.createElement('div');
+                    d.id = 'liveDebug';
+                    d.style.cssText = 'font-family:monospace;font-size:0.7em;color:#0f0;margin-top:4px;';
+                    ui.info.parentElement.appendChild(d);
+                    return d;
+                })();
+                dbg.innerText = `playing=${state.isPlaying} clock=${state.timelineClock.toFixed(2)} audioTime=${state.audioTime.toFixed(2)} lAP=${state.smoothPose.lAP.toFixed(2)} rAP=${state.smoothPose.rAP.toFixed(2)}`;
+            }
 
             if (currentModel) {
                 currentModel.updateMatrixWorld(true);
@@ -1206,9 +1210,7 @@
                 await new Promise(resolve => setTimeout(resolve, 100));
 
                 state.audioTime = 0;
-                state.playBaseTime = 0;
                 state.timelineClock = 0;
-                state.playEpoch = performance.now();
                 state.isPlaying = true;
                 applyTimelinePoseInstant(0);
 
