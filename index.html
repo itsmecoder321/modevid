@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Explainer Avatar Studio v5 (Looping Gestures)</title>
+    <title>Pro Explainer Avatar Studio v6 (True Human Motion)</title>
     <style>
         :root {
             --bg-color: #f4f4f9; --panel-bg: #ffffff; --text-color: #333333;
@@ -19,7 +19,7 @@
         body { background-color: var(--bg-color); color: var(--text-color); display: flex; height: 100vh; overflow: hidden; }
         
         #sidebar {
-            width: 450px; background-color: var(--panel-bg); border-right: 1px solid var(--border-color);
+            width: 460px; background-color: var(--panel-bg); border-right: 1px solid var(--border-color);
             padding: 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; z-index: 10;
         }
         .control-group { display: flex; flex-direction: column; gap: 4px; }
@@ -76,30 +76,34 @@
         </div>
         <div id="diagnostics"><div id="model-info">Upload a model to initialize...</div></div>
 
-        <!-- 1. Positioning -->
-        <details>
-            <summary>🎯 Framing & Positioning</summary>
-            <div class="details-content">
-                <button id="btnCenter" disabled>Auto Center & Fit Model</button>
-                <div class="row-group">
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Scale</label><input type="range" id="modScale" min="0.1" max="5" step="0.05" value="1"></div>
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Up / Down</label><input type="range" id="modPosY" min="-5" max="5" step="0.1" value="0"></div>
-                </div>
-                <div class="row-group">
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Left / Right</label><input type="range" id="modPosX" min="-5" max="5" step="0.1" value="0"></div>
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Near / Far</label><input type="range" id="modPosZ" min="-5" max="5" step="0.1" value="0"></div>
-                </div>
-            </div>
-        </details>
-
         <!-- 2. Explainer Behavior -->
         <details open>
             <summary>🗣️ Explainer Animations</summary>
             <div class="details-content">
-                <label class="sub-label">Hand Gestures Intensity (Automatic Looping)</label>
-                <input type="range" id="animGestures" min="0" max="3" step="0.1" value="1.0">
-                
+                <label class="sub-label" style="color:var(--text-color); font-weight:bold;">Arm & Elbow Dynamics</label>
                 <div class="row-group">
+                    <div class="control-group" style="flex:1;">
+                        <label class="sub-label">Arm Lift Height</label>
+                        <input type="range" id="animLift" min="0" max="2" step="0.1" value="1.0">
+                    </div>
+                    <div class="control-group" style="flex:1;">
+                        <label class="sub-label">Elbow Twist & Straighten</label>
+                        <input type="range" id="animTwist" min="0" max="2" step="0.1" value="1.0">
+                    </div>
+                </div>
+                
+                <div class="row-group" style="margin-top: 5px;">
+                    <div class="control-group" style="flex:1;">
+                        <label class="sub-label">Gesture Speed</label>
+                        <input type="range" id="animSpeed" min="0.5" max="2" step="0.1" value="1.0">
+                    </div>
+                    <div class="control-group" style="flex:1;">
+                        <label class="sub-label">Left/Right Asymmetry</label>
+                        <input type="range" id="animAsym" min="0" max="1" step="0.1" value="0.7">
+                    </div>
+                </div>
+
+                <div class="row-group" style="margin-top: 5px; border-top: 1px solid var(--border-color); padding-top: 8px;">
                     <div class="control-group" style="flex:1;">
                         <label class="sub-label">Body Sway</label>
                         <input type="range" id="animSway" min="0" max="3" step="0.1" value="1">
@@ -128,8 +132,8 @@
 
                 <label class="sub-label" style="color:var(--text-color); font-weight:bold; margin-top:5px;">Upper Arms</label>
                 <div class="row-group">
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Pitch (Fwd/Back)</label><input type="range" id="bArmP" min="-2" max="2" step="0.05" value="0.2"></div>
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Roll (Out/In)</label><input type="range" id="bArmR" min="-2" max="2" step="0.05" value="0.2"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Pitch (Fwd/Back)</label><input type="range" id="bArmP" min="-2" max="2" step="0.05" value="0.15"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Roll (Out/In)</label><input type="range" id="bArmR" min="-2" max="2" step="0.05" value="0.15"></div>
                 </div>
 
                 <label class="sub-label" style="color:var(--text-color); font-weight:bold; margin-top:5px;">Elbows / Forearms</label>
@@ -142,6 +146,22 @@
                 <div class="row-group">
                     <div class="control-group" style="flex:1;"><label class="sub-label">Flex (Pitch)</label><input type="range" id="bHandP" min="-1.5" max="1.5" step="0.05" value="0"></div>
                     <div class="control-group" style="flex:1;"><label class="sub-label">Wave (Roll)</label><input type="range" id="bHandR" min="-1.5" max="1.5" step="0.05" value="0"></div>
+                </div>
+            </div>
+        </details>
+
+        <!-- 1. Positioning -->
+        <details>
+            <summary>🎯 Framing & Positioning</summary>
+            <div class="details-content">
+                <button id="btnCenter" disabled>Auto Center & Fit Model</button>
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Scale</label><input type="range" id="modScale" min="0.1" max="5" step="0.05" value="1"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Up / Down</label><input type="range" id="modPosY" min="-5" max="5" step="0.1" value="0"></div>
+                </div>
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Left / Right</label><input type="range" id="modPosX" min="-5" max="5" step="0.1" value="0"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Near / Far</label><input type="range" id="modPosZ" min="-5" max="5" step="0.1" value="0"></div>
                 </div>
             </div>
         </details>
@@ -181,7 +201,7 @@
             morphMeshes: [], bones: {}, initialBones: {},
             time: 0, speechEnergy: 0, 
             
-            // The Automatic Loop Engine
+            // Smarter Automatic Loop Engine
             targetGestureState: 0, 
             gestureActiveState: 0, 
             gesturePhaseTimer: 0,
@@ -197,8 +217,12 @@
             play: document.getElementById('btnPlayPause'), rec: document.getElementById('btnRecord'),
             centerBtn: document.getElementById('btnCenter'), theme: document.getElementById('btnTheme'),
             container: document.getElementById('canvas-container'), info: document.getElementById('model-info'),
-            mouthAmp: document.getElementById('mouthAmp'), animGestures: document.getElementById('animGestures'), 
+            
+            mouthAmp: document.getElementById('mouthAmp'), 
+            animLift: document.getElementById('animLift'), animTwist: document.getElementById('animTwist'),
+            animSpeed: document.getElementById('animSpeed'), animAsym: document.getElementById('animAsym'),
             animSway: document.getElementById('animSway'), animHead: document.getElementById('animHead'),
+            
             scale: document.getElementById('modScale'), posX: document.getElementById('modPosX'), posY: document.getElementById('modPosY'), posZ: document.getElementById('modPosZ'),
             
             bShoulderP: document.getElementById('bShoulderP'), bShoulderR: document.getElementById('bShoulderR'),
@@ -373,7 +397,10 @@
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
             state.time += delta;
-            const t = state.time;
+            
+            // Adjust time by the user's gesture speed slider
+            const speedAmp = parseFloat(ui.animSpeed.value);
+            const t = state.time * speedAmp;
 
             if (currentModel) {
                 modelGroup.scale.setScalar(parseFloat(ui.scale.value));
@@ -395,30 +422,33 @@
             const talk = state.speechEnergy;
             const mouthMax = parseFloat(ui.mouthAmp.value);
             
-            const gestAmp = parseFloat(ui.animGestures.value);
+            const liftAmp = parseFloat(ui.animLift.value);
+            const twistAmp = parseFloat(ui.animTwist.value);
+            const asym = parseFloat(ui.animAsym.value);
             const swayAmp = parseFloat(ui.animSway.value);
             const headAmp = parseFloat(ui.animHead.value);
 
-            // --- THE LOOPING GESTURE ENGINE ---
-            // If they are speaking, constantly cycle between 1.0 (Arms up) and 0.0 (Arms down)
+            // --- SMARTER HUMAN LOOP ENGINE ---
+            // If speaking, cycle hands up and down naturally
             if (talk > 0.08) {
                 state.gesturePhaseTimer += delta;
                 if (state.gesturePhaseTimer > state.gestureNextPhaseTarget) {
-                    // Time to flip the state
                     state.targetGestureState = state.targetGestureState === 0 ? 1 : 0;
                     state.gesturePhaseTimer = 0;
-                    
-                    // Generate a random duration for the next phase (e.g., talk with hands up for 2 to 4 seconds)
-                    state.gestureNextPhaseTarget = Math.random() * 2.0 + 2.0; 
+                    // Human timing: Hands stay UP for 3-6 seconds, but rest DOWN for only 1-2 seconds
+                    if (state.targetGestureState === 1) {
+                        state.gestureNextPhaseTarget = Math.random() * 3.0 + 3.0; 
+                    } else {
+                        state.gestureNextPhaseTarget = Math.random() * 1.5 + 1.0; 
+                    }
                 }
             } else {
-                // If they stop speaking entirely, drop arms immediately for the next loop
                 state.targetGestureState = 0;
                 state.gesturePhaseTimer = 0;
                 state.gestureNextPhaseTarget = 0.5; // Next time they speak, lift arms almost instantly
             }
 
-            // Smoothly interpolate the actual physical arms to match the target state
+            // Smoothly interpolate the state
             state.gestureActiveState = THREE.MathUtils.lerp(state.gestureActiveState, state.targetGestureState, 0.03);
 
             // Blinking Engine
@@ -437,11 +467,11 @@
             }
 
             // Saccades (Eye movements)
-            if (t > state.nextSaccadeTime) {
+            if (state.time > state.nextSaccadeTime) { // Use unscaled time for eyes
                 state.eyeTarget.x = (Math.random() - 0.5) * 0.4;
                 state.eyeTarget.y = (Math.random() - 0.5) * 0.2;
-                state.nextSaccadeTime = t + Math.random() * 2.5 + 0.5;
-                if (state.blinkTimer < state.nextBlinkTime - 0.5) state.nextBlinkTime = state.blinkTimer; // Force blink on look
+                state.nextSaccadeTime = state.time + Math.random() * 2.5 + 0.5;
+                if (state.blinkTimer < state.nextBlinkTime - 0.5) state.nextBlinkTime = state.blinkTimer; 
             }
             state.currentEyePos.lerp(state.eyeTarget, 0.1);
 
@@ -463,51 +493,53 @@
                 applyAdditiveRotation(state.bones.neck, nod + state.currentEyePos.y * 0.2, state.currentEyePos.x * 0.3, -swayX);
                 applyAdditiveRotation(state.bones.head, nod + state.currentEyePos.y * 0.3, state.currentEyePos.x * 0.4, 0);
 
-                // --- ADVANCED ELBOW TWISTING & ARM LIFTING LOGIC ---
+                // --- ADVANCED HUMAN IRREGULAR ARM LOGIC ---
                 const bShoulderP = parseFloat(ui.bShoulderP.value); const bShoulderR = parseFloat(ui.bShoulderR.value);
                 const bArmP = parseFloat(ui.bArmP.value); const bArmR = parseFloat(ui.bArmR.value);
                 const bForeP = parseFloat(ui.bForeP.value); const bForeY = parseFloat(ui.bForeY.value);
                 const bHandP = parseFloat(ui.bHandP.value); const bHandR = parseFloat(ui.bHandR.value);
 
-                const lift = state.gestureActiveState * gestAmp;
+                // Apply user Lift multiplier to the active state
+                const baseLift = state.gestureActiveState * liftAmp;
+                const baseTwist = state.gestureActiveState * twistAmp;
                 
-                // Continuous, sweeping waves to make the elbows constantly twist and straighten dynamically
-                const armSweep = Math.sin(t * 1.5) * lift * 0.15; // Slow breathing sweep
-                const elbowTwistL = Math.cos(t * 2.8) * lift * 0.4; // Constant twisting motion
-                const elbowTwistR = Math.cos(t * 2.6) * lift * 0.4; // Constant twisting motion
-                const elbowStraightenL = Math.sin(t * 2.2) * lift * 0.3; // Constant in/out motion
-                const elbowStraightenR = Math.sin(t * 2.0) * lift * 0.3; // Constant in/out motion
+                // Composite, erratic waves (not just a perfect circle) to simulate human thought/hesitation
+                const wave1 = Math.sin(t * 2.1) * Math.cos(t * 1.3); // Erratic sweep
+                const wave2 = Math.cos(t * 1.8) * Math.sin(t * 0.9); // Erratic twist
+                
+                // Asymmetrical offset for the right arm
+                const rTime = t + (Math.PI * asym);
+                const rWave1 = Math.sin(rTime * 2.1) * Math.cos(rTime * 1.3);
+                const rWave2 = Math.cos(rTime * 1.8) * Math.sin(rTime * 0.9);
 
-                // Syllable chopping for emphasis
-                const activeChop = talk * lift; 
-                const chopL = Math.sin(t * 5.2) * activeChop * 0.3;
-                const chopR = Math.sin(t * 4.8) * activeChop * 0.3;
+                // Emphasized syllable chopping (Only happens when talking loudly)
+                const activeChop = (talk > 0.1 ? (talk * talk) : 0) * baseLift;
 
                 // SHOULDERS
-                const shoulderLiftP = lift * 0.15; 
-                const shoulderLiftR = lift * 0.05; 
+                const shoulderLiftP = baseLift * 0.15; 
+                const shoulderLiftR = baseLift * 0.05; 
                 applyAdditiveRotation(state.bones.lShoulder, bShoulderP + shoulderLiftP, 0, bShoulderR + shoulderLiftR);
                 applyAdditiveRotation(state.bones.rShoulder, bShoulderP + shoulderLiftP, 0, -bShoulderR - shoulderLiftR); 
 
                 // LEFT ARM
-                const lArmP = bArmP + (lift * 0.4) + armSweep; // Sweep forward/backward
-                const lArmR = bArmR + (lift * 0.3) + (Math.sin(t * 1.5) * 0.1 * lift); 
-                // Elbow: Bend dramatically, then actively straighten/bend using the wave
-                const lForeP = bForeP + (lift * 1.5) + chopL - elbowStraightenL; 
-                // Elbow: Constantly twist inward/outward
-                const lForeY = bForeY + (lift * 0.4) + elbowTwistL; 
-                const lHandP = bHandP - (lift * 0.3) + chopL; 
+                const lArmP = bArmP + (baseLift * 0.4) + (wave1 * 0.1 * baseLift); // Forward lift + erratic sweep
+                const lArmR = bArmR + (baseLift * 0.3) + (Math.sin(t * 1.2) * 0.1 * baseLift); // Open outward
+                // Elbow bends up to 90deg, plus erratic straightening, plus syllable chop
+                const lForeP = bForeP + (baseLift * 1.5) + (wave1 * baseTwist * 0.4) + (activeChop * 0.5); 
+                // Elbow twists palm in/out erratically
+                const lForeY = bForeY + (baseTwist * 0.4) + (wave2 * baseTwist * 0.6);
+                const lHandP = bHandP - (baseLift * 0.2) + (activeChop * 0.4); 
 
                 applyAdditiveRotation(state.bones.lArm, lArmP, 0, lArmR);
                 applyAdditiveRotation(state.bones.lFore, lForeP, lForeY, 0);
                 applyAdditiveRotation(state.bones.lHand, lHandP, 0, bHandR);
 
-                // RIGHT ARM (Mirrored)
-                const rArmP = bArmP + (lift * 0.35) - armSweep; // Asymmetrical sweep
-                const rArmR = -bArmR - (lift * 0.35) - (Math.cos(t * 1.4) * 0.1 * lift); 
-                const rForeP = bForeP + (lift * 1.4) + chopR + elbowStraightenR; 
-                const rForeY = -bForeY - (lift * 0.4) - elbowTwistR;
-                const rHandP = bHandP - (lift * 0.3) + chopR;
+                // RIGHT ARM (Asymmetrical)
+                const rArmP = bArmP + (baseLift * 0.35) + (rWave1 * 0.1 * baseLift); 
+                const rArmR = -bArmR - (baseLift * 0.35) - (Math.cos(rTime * 1.2) * 0.1 * baseLift); 
+                const rForeP = bForeP + (baseLift * 1.4) + (rWave1 * baseTwist * 0.4) + (activeChop * 0.4); 
+                const rForeY = -bForeY - (baseTwist * 0.4) - (rWave2 * baseTwist * 0.6);
+                const rHandP = bHandP - (baseLift * 0.2) + (activeChop * 0.4);
 
                 applyAdditiveRotation(state.bones.rArm, rArmP, 0, rArmR);
                 applyAdditiveRotation(state.bones.rFore, rForeP, rForeY, 0);
