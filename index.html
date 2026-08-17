@@ -172,12 +172,42 @@
                 <div class="row-group" style="margin-top: 5px;">
                     <div class="control-group" style="flex: 2;">
                         <select id="tlPreset">
-                            <option value="explain_both">Explain (Both Hands)</option>
-                            <option value="explain_right">Explain (Right Hand)</option>
-                            <option value="explain_left">Explain (Left Hand)</option>
-                            <option value="thinking">Thinking (Hand on Chin)</option>
-                            <option value="hands_hips">Hands on Hips</option>
-                            <option value="cross_arms">Crossed Arms</option>
+                            <optgroup label="Core">
+                                <option value="explain_both">Explain (Both Hands)</option>
+                                <option value="explain_right">Explain (Right Hand)</option>
+                                <option value="explain_left">Explain (Left Hand)</option>
+                                <option value="thinking">Thinking (Hand on Chin)</option>
+                                <option value="hands_hips">Hands on Hips</option>
+                                <option value="cross_arms">Crossed Arms</option>
+                            </optgroup>
+                            <optgroup label="Pointing & Directing">
+                                <option value="point_camera">Point at Camera</option>
+                                <option value="point_right">Point Right</option>
+                                <option value="point_left">Point Left</option>
+                                <option value="present_screen_right">Present to Graphic (Right)</option>
+                                <option value="present_screen_left">Present to Graphic (Left)</option>
+                                <option value="explain_sweep_mid">Explain Sweep (Mid-motion)</option>
+                            </optgroup>
+                            <optgroup label="Emphasis">
+                                <option value="count_one_right">Count One</option>
+                                <option value="count_two_hands">Count Two (Both Hands)</option>
+                                <option value="emphasis_chop_right">Emphasis Chop</option>
+                                <option value="fist_emphasis">Fist Emphasis</option>
+                                <option value="hand_raise_question">Raised Hand (Question)</option>
+                            </optgroup>
+                            <optgroup label="Open / Welcoming">
+                                <option value="open_palms_offer">Open Palms (Offering)</option>
+                                <option value="calm_palms_down">Calm Palms Down</option>
+                                <option value="welcome_open_arms">Welcome (Arms Open)</option>
+                                <option value="big_gesture_wide">Big Wide Gesture</option>
+                            </optgroup>
+                            <optgroup label="Reflective / Sincere">
+                                <option value="rub_chin_thinking">Rub Chin (Thinking)</option>
+                                <option value="hand_on_chest_sincere">Hand on Chest (Sincere)</option>
+                                <option value="steeple_fingers">Steeple Fingers</option>
+                                <option value="hands_clasped_front">Hands Clasped (Front)</option>
+                                <option value="shrug_confused">Shrug</option>
+                            </optgroup>
                         </select>
                     </div>
                     <button id="btnAddBlock" style="flex: 1;">Add Block</button>
@@ -281,13 +311,50 @@
             rSP:0, rSR:0, rSY:0, rAP:0.1, rAR:0.15, rAY:0, rFP:0.1, rFY:0, rHP:0, rHR:0 
         };
         
+        // ============================================================
+        // POSE AXIS CONVENTIONS (read this before adding/editing poses)
+        // Bones are applied as: setBoneAbsolute(bone, X, Y, Z) -> Euler(X,Y,Z,'XYZ')
+        //   X = forward/back pitch   Y = twist (yaw)   Z = out/in roll
+        // The RIGHT side is mirrored automatically by the renderer ONLY for
+        // the "roll" axes: rAR (arm out/in) and rHR (hand twist). Everything
+        // else (AP/FP/HP pitch, AY/FY/SY twist, SP/SR/SY shoulder) is NOT
+        // auto-mirrored. So for a visually symmetric two-arm gesture:
+        //   - AP, FP, HP, SP  -> use the SAME value on both l* and r*
+        //   - AR, HR          -> use the SAME value on both l* and r* (code negates R for you)
+        //   - AY, FY, SY      -> use OPPOSITE signs on l* vs r* (l positive / r negative)
+        // Getting this backwards is exactly why the original 6 presets looked
+        // twisted/asymmetric — they've been corrected below using this rule.
+        // ============================================================
         const PoseLibrary = {
-            explain_both: { ...BaseRest, lSP:0.15, lAP:0.6, lAR:0.3, lFP:1.5, lFY:0.3, lHP:-0.2, rSP:0.15, rAP:0.6, rAR:0.3, rFP:1.5, rFY:-0.3, rHP:-0.2 },
-            explain_right: { ...BaseRest, rSP:0.15, rAP:0.6, rAR:0.3, rFP:1.5, rFY:-0.3, rHP:-0.2 },
-            explain_left: { ...BaseRest, lSP:0.15, lAP:0.6, lAR:0.3, lFP:1.5, lFY:0.3, lHP:-0.2 },
-            thinking: { ...BaseRest, rSP:0.1, rAP:0.8, rAY:-0.2, rAR:-0.1, rFP:2.1, rFY:-0.5, rHP:-0.1 },
-            hands_hips: { ...BaseRest, lAP:0.2, lAR:0.5, lAY:0.4, lFP:1.0, lFY:0.8, lHP:-0.4, rAP:0.2, rAR:0.5, rAY:-0.4, rFP:1.0, rFY:-0.8, rHP:-0.4 },
-            cross_arms: { ...BaseRest, lAP:0.5, lAR:0.2, lAY:0.5, lFP:1.4, lFY:0.8, rAP:0.5, rAR:0.2, rAY:-0.5, rFP:1.4, rFY:-0.8 }
+            // --- Corrected originals ---
+            explain_both: { ...BaseRest, lSP:0.10, rSP:0.10, lAP:0.50, rAP:0.50, lAR:0.35, rAR:0.35, lAY:0.15, rAY:-0.15, lFP:1.30, rFP:1.30, lFY:0.20, rFY:-0.20, lHP:-0.15, rHP:-0.15, lHR:0.10, rHR:0.10 },
+            explain_right: { ...BaseRest, rSP:0.10, rAP:0.50, rAR:0.35, rAY:-0.15, rFP:1.30, rFY:-0.20, rHP:-0.15, rHR:0.10 },
+            explain_left: { ...BaseRest, lSP:0.10, lAP:0.50, lAR:0.35, lAY:0.15, lFP:1.30, lFY:0.20, lHP:-0.15, lHR:0.10 },
+            thinking: { ...BaseRest, rSP:0.10, rAP:0.90, rAY:-0.30, rAR:-0.15, rFP:2.20, rFY:-0.60, rHP:-0.20, rHR:0.10 },
+            hands_hips: { ...BaseRest, lAP:0.15, rAP:0.15, lAR:0.55, rAR:0.55, lAY:0.35, rAY:-0.35, lFP:1.10, rFP:1.10, lFY:0.70, rFY:-0.70, lHP:-0.30, rHP:-0.30, lHR:0.15, rHR:0.15 },
+            cross_arms: { ...BaseRest, lAP:0.45, rAP:0.45, lAR:0.25, rAR:0.25, lAY:0.45, rAY:-0.45, lFP:1.50, rFP:1.50, lFY:0.90, rFY:-0.90, lHP:-0.10, rHP:-0.10, lHR:0.05, rHR:0.05 },
+
+            // --- 20 new explainer/vlogger speaking gestures ---
+            point_camera: { ...BaseRest, rSP:0.10, rAP:1.00, rAR:0.05, rAY:-0.05, rFP:0.30, rFY:-0.10, rHP:-0.10 },
+            point_right: { ...BaseRest, rSP:0.05, rAP:0.30, rAR:0.90, rAY:-0.10, rFP:0.40, rFY:-0.10, rHP:-0.10 },
+            point_left: { ...BaseRest, lSP:0.05, lAP:0.30, lAR:0.90, lAY:0.10, lFP:0.40, lFY:0.10, lHP:-0.10 },
+            count_one_right: { ...BaseRest, rSP:0.15, rAP:0.60, rAR:0.20, rAY:-0.20, rFP:2.30, rFY:-0.30, rHP:-0.30 },
+            count_two_hands: { ...BaseRest, lAP:0.55, rAP:0.55, lAR:0.30, rAR:0.30, lAY:0.10, rAY:-0.10, lFP:1.80, rFP:1.80, lFY:0.10, rFY:-0.10, lHP:-0.30, rHP:-0.30 },
+            emphasis_chop_right: { ...BaseRest, rSP:0.20, rAP:0.70, rAR:0.15, rAY:-0.10, rFP:1.00, rFY:-0.20, rHP:0.30 },
+            open_palms_offer: { ...BaseRest, lAP:0.45, rAP:0.45, lAR:0.40, rAR:0.40, lAY:0.20, rAY:-0.20, lFP:1.20, rFP:1.20, lFY:0.35, rFY:-0.35, lHP:-0.40, rHP:-0.40 },
+            calm_palms_down: { ...BaseRest, lAP:0.35, rAP:0.35, lAR:0.35, rAR:0.35, lAY:0.15, rAY:-0.15, lFP:1.40, rFP:1.40, lFY:0.15, rFY:-0.15, lHP:0.30, rHP:0.30 },
+            welcome_open_arms: { ...BaseRest, lAP:0.20, rAP:0.20, lAR:1.20, rAR:1.20, lFP:0.30, rFP:0.30, lFY:0.10, rFY:-0.10, lHP:-0.10, rHP:-0.10 },
+            shrug_confused: { ...BaseRest, lSP:0.15, rSP:0.15, lAP:0.25, rAP:0.25, lAR:0.50, rAR:0.50, lAY:0.20, rAY:-0.20, lFP:1.90, rFP:1.90, lFY:0.40, rFY:-0.40, lHP:-0.30, rHP:-0.30 },
+            hand_on_chest_sincere: { ...BaseRest, rSP:0.10, rAP:0.50, rAR:-0.30, rAY:-0.50, rFP:2.40, rFY:-0.70, rHP:-0.20 },
+            present_screen_right: { ...BaseRest, lSP:0.05, lAP:0.25, lAR:1.00, lAY:0.05, lFP:0.35, lFY:0.05, lHP:-0.10 },
+            present_screen_left: { ...BaseRest, rSP:0.05, rAP:0.25, rAR:1.00, rAY:-0.05, rFP:0.35, rFY:-0.05, rHP:-0.10 },
+            rub_chin_thinking: { ...BaseRest, rSP:0.10, rAP:0.85, rAY:-0.35, rAR:-0.20, rFP:2.30, rFY:-0.55, rHP:0.10, rHR:0.20 },
+            big_gesture_wide: { ...BaseRest, lAP:0.50, rAP:0.50, lAR:1.00, rAR:1.00, lAY:0.10, rAY:-0.10, lFP:0.80, rFP:0.80, lFY:0.30, rFY:-0.30, lHP:-0.25, rHP:-0.25 },
+            hand_raise_question: { ...BaseRest, rSP:0.25, rAP:0.60, rAR:0.15, rAY:-0.10, rFP:2.60, rFY:-0.20, rHP:-0.20 },
+            fist_emphasis: { ...BaseRest, rSP:0.20, rAP:0.65, rAR:0.20, rAY:-0.15, rFP:1.20, rFY:-0.15, rHP:0.20, rHR:-0.10 },
+            hands_clasped_front: { ...BaseRest, lAP:0.30, rAP:0.30, lAR:0.35, rAR:0.35, lAY:0.50, rAY:-0.50, lFP:1.70, rFP:1.70, lFY:0.60, rFY:-0.60, lHP:-0.10, rHP:-0.10 },
+            steeple_fingers: { ...BaseRest, lAP:0.35, rAP:0.35, lAR:0.30, rAR:0.30, lAY:0.55, rAY:-0.55, lFP:2.00, rFP:2.00, lFY:0.65, rFY:-0.65, lHP:-0.05, rHP:-0.05 },
+            explain_sweep_mid: { ...BaseRest, rSP:0.10, rAP:0.55, rAR:0.60, rAY:-0.20, rFP:0.90, rFY:-0.25, rHP:-0.15 }
         };
 
         const state = {
