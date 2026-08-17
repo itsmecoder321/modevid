@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cinematic Avatar Keyframer</title>
+    <title>Cinematic Avatar Studio v7</title>
     <style>
         :root {
             --bg-color: #f4f4f9; --panel-bg: #ffffff; --text-color: #333333;
@@ -19,7 +19,7 @@
         body { background-color: var(--bg-color); color: var(--text-color); display: flex; height: 100vh; overflow: hidden; }
         
         #sidebar {
-            width: 480px; min-width: 480px; background-color: var(--panel-bg); 
+            width: 500px; min-width: 500px; background-color: var(--panel-bg); 
             border-right: 1px solid var(--border-color); display: flex; flex-direction: column; z-index: 10;
         }
         
@@ -56,7 +56,7 @@
         .audio-times { display: flex; justify-content: space-between; font-size: 0.75em; color: gray; font-family: monospace; margin-top: 4px; }
 
         /* Timeline Blocks UI */
-        #timelineList { display: flex; flex-direction: column; gap: 6px; margin-top: 5px; max-height: 200px; overflow-y: auto; padding-right: 5px; }
+        #timelineList { display: flex; flex-direction: column; gap: 6px; margin-top: 5px; max-height: 180px; overflow-y: auto; padding-right: 5px; }
         .tl-item { background: var(--bg-color); border: 1px solid var(--border-color); padding: 8px 10px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; font-size: 0.85em; transition: 0.2s; }
         .tl-item.editing { border-left: 4px solid var(--danger-color); background: var(--block-bg); }
         
@@ -65,9 +65,10 @@
         .tl-edit { background: var(--accent-color); color: white; }
         .tl-delete { background: var(--danger-color); color: white; }
 
-        /* Pose Editor */
-        #poseEditorPanel { display: none; border-top: 2px dashed var(--danger-color); padding-top: 10px; margin-top: 5px; }
+        /* Pose Editor Modal Style */
+        #poseEditorPanel { display: none; background: var(--bg-color); border: 2px dashed var(--danger-color); padding: 15px; border-radius: 6px; margin-top: 5px; }
         #poseEditorPanel.active { display: flex; flex-direction: column; gap: 8px; }
+        .tuner-col { flex: 1; display: flex; flex-direction: column; gap: 6px; background: var(--section-bg); padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); }
 
         #diagnostics { background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; font-size: 0.75em; max-height: 80px; overflow-y: auto; }
         .success { color: #28a745; font-weight:bold; } .warning { color: #ffc107; font-weight:bold; } .error { color: #dc3545; font-weight:bold; }
@@ -93,7 +94,7 @@
         <div style="padding: 15px 15px 0 15px;">
             <div class="audio-player-box">
                 <div class="control-group">
-                    <label>Audio Scrubber</label>
+                    <label>Timeline & Audio Scrubber</label>
                     <input type="range" id="audioSeek" min="0" max="0" step="0.01" value="0" disabled>
                     <div class="audio-times">
                         <span id="timeCurrent">0.0s</span>
@@ -105,8 +106,8 @@
         </div>
 
         <div class="tabs">
-            <button class="tab-btn active" data-target="tab-setup">1. Model & Scene</button>
-            <button class="tab-btn" data-target="tab-timeline">2. Timeline & Poses</button>
+            <button class="tab-btn active" data-target="tab-setup">1. Setup & Environment</button>
+            <button class="tab-btn" data-target="tab-timeline">2. Presets & Timeline</button>
         </div>
 
         <!-- TAB 1: SETUP -->
@@ -140,7 +141,7 @@
                 <label style="color: var(--accent-color);">Life Overrides & Export</label>
                 <div class="row-group">
                     <div class="control-group" style="flex: 1;"><label class="sub-label">Lip Sync Intensity</label><input type="range" id="mouthAmp" min="0" max="2" step="0.05" value="0.8"></div>
-                    <div class="control-group" style="flex: 1;"><label class="sub-label">Body Sway (Breath)</label><input type="range" id="animSway" min="0" max="2" step="0.1" value="1.0"></div>
+                    <div class="control-group" style="flex: 1;"><label class="sub-label">Body Sway Intensity</label><input type="range" id="animSway" min="0" max="2" step="0.1" value="1.0"></div>
                 </div>
                 <div class="row-group" style="margin-top: 5px;">
                     <div class="control-group" style="flex: 1;"><label class="sub-label">Background</label><input type="color" id="bgColor" value="#00ff00"></div>
@@ -157,54 +158,76 @@
         <!-- TAB 2: TIMELINE & POSE EDITOR -->
         <div id="tab-timeline" class="tab-content">
             
+            <!-- Add Block Area -->
             <div class="panel-section" style="background-color: #e8f4fd; border-color: #b8daff;">
-                <label style="color: var(--accent-color);">➕ Add Animation Block</label>
+                <label style="color: var(--accent-color);">➕ Add Preset Block to Timeline</label>
                 <div class="row-group">
                     <div class="control-group" style="flex: 1;"><label class="sub-label">Start (s)</label><input type="number" id="tlStart" min="0" step="0.1" value="0.0"></div>
                     <div class="control-group" style="flex: 1;"><label class="sub-label">End (s)</label><input type="number" id="tlEnd" min="0.1" step="0.1" value="3.0"></div>
                 </div>
                 <div class="row-group" style="margin-top: 5px;">
                     <div class="control-group" style="flex: 2;">
-                        <label class="sub-label">Select Preset Pose</label>
                         <select id="tlPreset">
                             <option value="explain_both">Explain (Both Hands)</option>
                             <option value="explain_right">Explain (Right Hand)</option>
                             <option value="explain_left">Explain (Left Hand)</option>
                             <option value="thinking">Thinking (Hand on Chin)</option>
                             <option value="hands_hips">Hands on Hips</option>
+                            <option value="cross_arms">Crossed Arms</option>
                         </select>
                     </div>
-                    <button id="btnAddBlock" style="flex: 1; margin-top: auto;">Add Block</button>
+                    <button id="btnAddBlock" style="flex: 1;">Add Block</button>
                 </div>
             </div>
 
+            <!-- Timeline List -->
             <div class="panel-section">
                 <label style="color: var(--accent-color);">Timeline Tracks</label>
-                <div style="font-size:0.7em; color:gray;">Click 'Tune' to fix clipping for a specific block. Gaps will automatically return to Resting Pose.</div>
-                <div id="timelineList">
-                    <!-- Blocks go here -->
-                </div>
+                <div style="font-size:0.7em; color:gray;">Click 'Tune' to override a preset for your specific model.</div>
+                <div id="timelineList"></div>
             </div>
 
             <!-- DYNAMIC POSE TUNER (Hidden until Edit is clicked) -->
             <div id="poseEditorPanel">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <label style="color: var(--danger-color);">Tuning Block: <span id="editBlockLabel">0.0s - 3.0s</span></label>
-                    <button id="btnDoneEdit" style="background:var(--text-color); padding:4px 8px;">Done</button>
+                    <label style="color: var(--danger-color);">Tuning Block: <span id="editBlockLabel"></span></label>
+                    <button id="btnDoneEdit" style="background:var(--text-color); padding:4px 8px;">Save & Close</button>
                 </div>
-                <div style="font-size:0.7em; color:gray; margin-bottom:5px;">Adjust sliders to fix clipping for this specific timeline block.</div>
                 
-                <div class="row-group">
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Left Arm Fwd/Back</label><input type="range" class="pose-slider" id="lAP" data-key="lAP" min="-2.5" max="2.5" step="0.05" value="0"></div>
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Right Arm Fwd/Back</label><input type="range" class="pose-slider" id="rAP" data-key="rAP" min="-2.5" max="2.5" step="0.05" value="0"></div>
-                </div>
-                <div class="row-group">
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Left Arm Out/In</label><input type="range" class="pose-slider" id="lAR" data-key="lAR" min="-2.5" max="2.5" step="0.05" value="0"></div>
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Right Arm Out/In</label><input type="range" class="pose-slider" id="rAR" data-key="rAR" min="-2.5" max="2.5" step="0.05" value="0"></div>
-                </div>
-                <div class="row-group">
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Left Elbow Bend</label><input type="range" class="pose-slider" id="lFP" data-key="lFP" min="-2.8" max="2.8" step="0.05" value="0"></div>
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Right Elbow Bend</label><input type="range" class="pose-slider" id="rFP" data-key="rFP" min="-2.8" max="2.8" step="0.05" value="0"></div>
+                <div class="row-group" style="align-items: flex-start;">
+                    <!-- LEFT SIDE -->
+                    <div class="tuner-col">
+                        <label style="color: var(--accent-color); font-size: 0.8em;">LEFT SIDE</label>
+                        <div class="control-group"><label class="sub-label">Shoulder Pitch / Roll</label>
+                            <div class="row-group"><input type="range" class="pose-slider" id="lSP" data-key="lSP" min="-1" max="1" step="0.05"><input type="range" class="pose-slider" id="lSR" data-key="lSR" min="-1" max="1" step="0.05"></div>
+                        </div>
+                        <div class="control-group"><label class="sub-label">Arm Fwd/Back / Out/In / Twist</label>
+                            <div class="row-group"><input type="range" class="pose-slider" id="lAP" data-key="lAP" min="-2.5" max="2.5" step="0.05"><input type="range" class="pose-slider" id="lAR" data-key="lAR" min="-2.5" max="2.5" step="0.05"><input type="range" class="pose-slider" id="lAY" data-key="lAY" min="-2.5" max="2.5" step="0.05"></div>
+                        </div>
+                        <div class="control-group"><label class="sub-label">Elbow Bend / Twist</label>
+                            <div class="row-group"><input type="range" class="pose-slider" id="lFP" data-key="lFP" min="-2.8" max="2.8" step="0.05"><input type="range" class="pose-slider" id="lFY" data-key="lFY" min="-2.8" max="2.8" step="0.05"></div>
+                        </div>
+                        <div class="control-group"><label class="sub-label">Wrist Bend / Twist</label>
+                            <div class="row-group"><input type="range" class="pose-slider" id="lHP" data-key="lHP" min="-1.5" max="1.5" step="0.05"><input type="range" class="pose-slider" id="lHR" data-key="lHR" min="-1.5" max="1.5" step="0.05"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- RIGHT SIDE -->
+                    <div class="tuner-col">
+                        <label style="color: var(--accent-color); font-size: 0.8em;">RIGHT SIDE</label>
+                        <div class="control-group"><label class="sub-label">Shoulder Pitch / Roll</label>
+                            <div class="row-group"><input type="range" class="pose-slider" id="rSP" data-key="rSP" min="-1" max="1" step="0.05"><input type="range" class="pose-slider" id="rSR" data-key="rSR" min="-1" max="1" step="0.05"></div>
+                        </div>
+                        <div class="control-group"><label class="sub-label">Arm Fwd/Back / Out/In / Twist</label>
+                            <div class="row-group"><input type="range" class="pose-slider" id="rAP" data-key="rAP" min="-2.5" max="2.5" step="0.05"><input type="range" class="pose-slider" id="rAR" data-key="rAR" min="-2.5" max="2.5" step="0.05"><input type="range" class="pose-slider" id="rAY" data-key="rAY" min="-2.5" max="2.5" step="0.05"></div>
+                        </div>
+                        <div class="control-group"><label class="sub-label">Elbow Bend / Twist</label>
+                            <div class="row-group"><input type="range" class="pose-slider" id="rFP" data-key="rFP" min="-2.8" max="2.8" step="0.05"><input type="range" class="pose-slider" id="rFY" data-key="rFY" min="-2.8" max="2.8" step="0.05"></div>
+                        </div>
+                        <div class="control-group"><label class="sub-label">Wrist Bend / Twist</label>
+                            <div class="row-group"><input type="range" class="pose-slider" id="rHP" data-key="rHP" min="-1.5" max="1.5" step="0.05"><input type="range" class="pose-slider" id="rHR" data-key="rHR" min="-1.5" max="1.5" step="0.05"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -221,16 +244,20 @@
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-        // --- PRESET POSE LIBRARY (16 Axis Coordinates) ---
-        // P=Pitch, R=Roll, Y=Yaw
-        const BaseRest = { lSP:0, lSR:0, lAP:0.1, lAR:0.15, lFP:0.1, lFY:0, lHP:0, lHR:0, rSP:0, rSR:0, rAP:0.1, rAR:0.15, rFP:0.1, rFY:0, rHP:0, rHR:0 };
+        // --- PRESET POSE LIBRARY (18 Axis Coordinates) ---
+        // S=Shoulder, A=Arm, F=Forearm, H=Hand. P=Pitch(X), Y=Yaw(Y), R=Roll(Z)
+        const BaseRest = { 
+            lSP:0, lSR:0, lAP:0.1, lAR:0.15, lAY:0, lFP:0.1, lFY:0, lHP:0, lHR:0, 
+            rSP:0, rSR:0, rAP:0.1, rAR:0.15, rAY:0, rFP:0.1, rFY:0, rHP:0, rHR:0 
+        };
         
         const PoseLibrary = {
             explain_both: { ...BaseRest, lSP:0.15, lAP:0.6, lAR:0.3, lFP:1.5, lFY:0.3, lHP:-0.2, rSP:0.15, rAP:0.6, rAR:0.3, rFP:1.5, rFY:-0.3, rHP:-0.2 },
             explain_right: { ...BaseRest, rSP:0.15, rAP:0.6, rAR:0.3, rFP:1.5, rFY:-0.3, rHP:-0.2 },
             explain_left: { ...BaseRest, lSP:0.15, lAP:0.6, lAR:0.3, lFP:1.5, lFY:0.3, lHP:-0.2 },
-            thinking: { ...BaseRest, rSP:0.1, rAP:0.8, rAR:-0.1, rFP:2.1, rFY:-0.5, rHP:-0.1 },
-            hands_hips: { ...BaseRest, lAP:0.2, lAR:0.5, lFP:1.0, lFY:0.8, lHP:-0.4, rAP:0.2, rAR:0.5, rFP:1.0, rFY:-0.8, rHP:-0.4 }
+            thinking: { ...BaseRest, rSP:0.1, rAP:0.8, rAY:-0.2, rAR:-0.1, rFP:2.1, rFY:-0.5, rHP:-0.1 },
+            hands_hips: { ...BaseRest, lAP:0.2, lAR:0.5, lAY:0.4, lFP:1.0, lFY:0.8, lHP:-0.4, rAP:0.2, rAR:0.5, rAY:-0.4, rFP:1.0, rFY:-0.8, rHP:-0.4 },
+            cross_arms: { ...BaseRest, lAP:0.5, lAR:0.2, lAY:0.5, lFP:1.4, lFY:0.8, rAP:0.5, rAR:0.2, rAY:-0.5, rFP:1.4, rFY:-0.8 }
         };
 
         const state = {
@@ -241,9 +268,9 @@
             blinkTimer: 0, nextBlinkTime: 2.0, isBlinkingNow: 0,
             
             // KEYFRAME ENGINE
-            blocks: [], // { id, start, end, label, customPose }
+            blocks: [], // Array of { id, start, end, label, customPose }
             editingBlockId: null,
-            smoothPose: { ...BaseRest } // The actual values applied to bones every frame
+            smoothPose: { ...BaseRest } // Live interpolated values applied to bones
         };
 
         const ui = {
@@ -254,7 +281,6 @@
             container: document.getElementById('canvas-container'), info: document.getElementById('model-info'),
             mouthAmp: document.getElementById('mouthAmp'), animSway: document.getElementById('animSway'),
             scale: document.getElementById('modScale'), posX: document.getElementById('modPosX'), posY: document.getElementById('modPosY'), posZ: document.getElementById('modPosZ'),
-            
             audioSeek: document.getElementById('audioSeek'), timeCur: document.getElementById('timeCurrent'), timeTot: document.getElementById('timeTotal'),
             
             // Timeline UI
@@ -283,7 +309,7 @@
             ui.tlList.innerHTML = '';
             
             if (state.blocks.length === 0) {
-                ui.tlList.innerHTML = '<div style="font-size:0.8em; color:gray;">Timeline is empty. Avatar will remain in resting pose.</div>';
+                ui.tlList.innerHTML = '<div style="font-size:0.8em; color:gray; padding:5px;">Timeline empty. Avatar will stay in Resting Pose.</div>';
             }
 
             state.blocks.forEach(block => {
@@ -296,8 +322,8 @@
                 actions.className = 'tl-actions';
                 
                 const btnEdit = document.createElement('button');
-                btnEdit.className = 'tl-btn tl-edit'; btnEdit.innerText = 'Tune';
-                btnEdit.onclick = () => openPoseEditor(block.id);
+                btnEdit.className = 'tl-btn tl-edit'; btnEdit.innerText = isEditing ? 'Tuning...' : 'Tune';
+                btnEdit.onclick = () => isEditing ? closePoseEditor() : openPoseEditor(block.id);
                 
                 const btnDel = document.createElement('button');
                 btnDel.className = 'tl-btn tl-delete'; btnDel.innerText = 'X';
@@ -316,17 +342,15 @@
         ui.btnAddBlock.addEventListener('click', () => {
             const start = parseFloat(ui.tlStart.value);
             const end = parseFloat(ui.tlEnd.value);
-            if (start >= end) { alert("End time must be greater than Start time."); return; }
+            if (start >= end) { alert("End time must be greater than Start."); return; }
             
             const presetId = ui.tlPreset.value;
             const label = ui.tlPreset.options[ui.tlPreset.selectedIndex].text;
-            
-            // Clone the preset so it can be edited safely
-            const customPose = { ...PoseLibrary[presetId] };
+            const customPose = { ...PoseLibrary[presetId] }; // Deep clone preset
             
             state.blocks.push({ id: Date.now(), start, end, label, customPose });
             
-            // Auto increment UI for next block
+            // Auto-advance UI
             ui.tlStart.value = end.toFixed(1);
             ui.tlEnd.value = (end + 3.0).toFixed(1);
             
@@ -339,19 +363,18 @@
             const block = state.blocks.find(b => b.id === blockId);
             if (!block) return;
             
-            ui.editLabel.innerText = `${block.start.toFixed(1)}s - ${block.end.toFixed(1)}s (${block.label})`;
+            ui.editLabel.innerText = `${block.start.toFixed(1)}s - ${block.end.toFixed(1)}s`;
             ui.editorPanel.classList.add('active');
             
-            // Populate sliders with block's custom data
+            // Populate sliders with block's data
             ui.poseSliders.forEach(slider => {
                 const key = slider.getAttribute('data-key');
                 slider.value = block.customPose[key];
             });
             
-            // Scrub audio to the middle of this block so user sees what they are editing
+            // Auto-scrub audio to the middle of the block so user sees what they are doing
             const midTime = block.start + ((block.end - block.start) / 2);
             seekAudio(midTime);
-            
             renderTimeline();
         }
 
@@ -369,8 +392,6 @@
                 if (block) {
                     const key = e.target.getAttribute('data-key');
                     block.customPose[key] = parseFloat(e.target.value);
-                    // Force the smoothing engine to update instantly while scrubbing
-                    state.smoothPose[key] = block.customPose[key];
                 }
             });
         });
@@ -488,7 +509,7 @@
                     }
                 });
 
-                ui.info.innerHTML = `<span class="success">Rig Active! Model Ready.</span>`;
+                ui.info.innerHTML = `<span class="success">Rig Active! ${blendshapeCount} Face Shapes.</span>`;
                 ui.centerBtn.disabled = false; centerAndFitModel();
                 if(audioBuffer) ui.rec.disabled = false;
                 window.URL.revokeObjectURL(url);
@@ -545,7 +566,7 @@
             }
         });
 
-        // --- ENGINE MATH ---
+        // --- ANIMATION CORE MATH ---
         function cleanName(n) { return n.toLowerCase().replace(/[^a-z0-9]/g, ''); }
         function setMorphUniversal(mesh, searchNames, value, speed = 0.4) {
             if (!mesh.morphTargetDictionary) return;
@@ -574,10 +595,21 @@
             bone.quaternion.multiply(offsetQ); 
         }
 
-        // Retrieves the target pose based on the timeline
+        // Returns what pose the avatar should be in based on the current timeline clock
         function getTargetPoseAtTime(t) {
-            const block = state.blocks.find(b => t >= b.start && t <= b.end);
-            return block ? block.customPose : BaseRest;
+            if (state.editingBlockId) {
+                // Force preview of the block being actively tuned
+                const b = state.blocks.find(x => x.id === state.editingBlockId);
+                if (b) return b.customPose;
+            }
+            
+            // Check if current time falls inside any block
+            for (let i = 0; i < state.blocks.length; i++) {
+                if (t >= state.blocks[i].start && t <= state.blocks[i].end) {
+                    return state.blocks[i].customPose;
+                }
+            }
+            return BaseRest; // Default to rest if time is outside all blocks
         }
 
         const clock = new THREE.Clock();
@@ -588,12 +620,8 @@
             state.time += delta;
 
             if (currentModel) {
-                const scl = parseFloat(ui.scale.value) || 1;
-                const px = parseFloat(ui.posX.value) || 0;
-                const py = parseFloat(ui.posY.value) || 0;
-                const pz = parseFloat(ui.posZ.value) || 0;
-                modelGroup.scale.setScalar(scl);
-                modelGroup.position.set(px, py, pz);
+                modelGroup.scale.setScalar(parseFloat(ui.scale.value) || 1);
+                modelGroup.position.set(parseFloat(ui.posX.value)||0, parseFloat(ui.posY.value)||0, parseFloat(ui.posZ.value)||0);
             }
 
             let vocalEnergy = 0, highEnergy = 0;
@@ -612,32 +640,30 @@
                 state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, 0, 0.1);
             }
 
-            // --- THE SMOOTHING ENGINE ---
-            // Calculate what pose we *should* be in right now
+            // --- 1. DETERMINE TARGET POSE & SMOOTH LERP ---
             const targetPose = getTargetPoseAtTime(state.audioTime);
             
-            // Smoothly lerp the engine's internal state towards the target
-            // 8.0 multiplier means it takes ~0.2 seconds to smoothly fade between poses (no snapping)
             for (let key in state.smoothPose) {
-                state.smoothPose[key] = THREE.MathUtils.lerp(state.smoothPose[key], targetPose[key], delta * 8.0);
+                // Smoothly blend the entire body to the target over ~0.15s (delta * 6.0)
+                state.smoothPose[key] = THREE.MathUtils.lerp(state.smoothPose[key], targetPose[key], delta * 6.0);
             }
 
             if (currentModel) {
-                // Apply the smoothed pose to the bones
                 const p = state.smoothPose;
+                // Apply Smoothed Base Poses
                 setBoneAbsolute(state.bones.lShoulder, p.lSP, 0, p.lSR);
-                setBoneAbsolute(state.bones.lArm, p.lAP, 0, p.lAR);
+                setBoneAbsolute(state.bones.lArm, p.lAP, p.lAY, p.lAR);
                 setBoneAbsolute(state.bones.lFore, p.lFP, p.lFY, 0);
                 setBoneAbsolute(state.bones.lHand, p.lHP, 0, p.lHR);
 
                 setBoneAbsolute(state.bones.rShoulder, p.rSP, 0, p.rSR);
-                setBoneAbsolute(state.bones.rArm, p.rAP, 0, -p.rAR); // Mirrored visually
+                setBoneAbsolute(state.bones.rArm, p.rAP, p.rAY, -p.rAR); // Mirrored visually
                 setBoneAbsolute(state.bones.rFore, p.rFP, p.rFY, 0);
                 setBoneAbsolute(state.bones.rHand, p.rHP, 0, -p.rHR);
 
-                // Layer Procedural Life Over It
+                // --- 2. LAYER PROCEDURAL LIFE ON TOP ---
                 const t = state.time;
-                const swayAmp = parseFloat(ui.animSway.value);
+                const swayAmp = parseFloat(ui.animSway.value) || 1.0;
                 const talk = state.speechEnergy;
 
                 // Eyes & Blinking
@@ -659,7 +685,7 @@
                 setBoneAbsolute(state.bones.lEye, 0,0,0); applyAdditiveProcedural(state.bones.lEye, state.currentEyePos.y, state.currentEyePos.x, 0);
                 setBoneAbsolute(state.bones.rEye, 0,0,0); applyAdditiveProcedural(state.bones.rEye, state.currentEyePos.y, state.currentEyePos.x, 0);
 
-                // Core Body Sway
+                // Body Sway (Breathing)
                 if (state.bones.hips) {
                     const shiftX = Math.sin(t * 0.4) * 0.015 * swayAmp;
                     setBoneAbsolute(state.bones.hips, 0,0,0);
@@ -671,20 +697,12 @@
                 setBoneAbsolute(state.bones.spine, 0,0,0); applyAdditiveProcedural(state.bones.spine, breath, 0, swayX);
                 setBoneAbsolute(state.bones.chest, 0,0,0); applyAdditiveProcedural(state.bones.chest, breath * 1.5, 0, swayX * 0.5);
 
-                const nod = (Math.sin(t * 3) * 0.03 * talk) + (breath * 0.5);
+                const nod = ((Math.sin(t * 3) * 0.03 * talk) + (breath * 0.5));
                 setBoneAbsolute(state.bones.neck, 0,0,0); applyAdditiveProcedural(state.bones.neck, nod + state.currentEyePos.y * 0.2, state.currentEyePos.x * 0.3, -swayX);
                 setBoneAbsolute(state.bones.head, 0,0,0); applyAdditiveProcedural(state.bones.head, nod + state.currentEyePos.y * 0.3, state.currentEyePos.x * 0.4, 0);
-
-                // Syllable Emphasis (Chop hands slightly on audio beat if arms are raised > 0.5 rad)
-                if (p.lFP > 0.5 || p.rFP > 0.5) { 
-                    const chopL = Math.sin(t * 5.2) * talk * 0.15;
-                    const chopR = Math.sin(t * 4.8) * talk * 0.15;
-                    if(p.lFP > 0.5) applyAdditiveProcedural(state.bones.lFore, chopL, 0, 0);
-                    if(p.rFP > 0.5) applyAdditiveProcedural(state.bones.rFore, chopR, 0, 0);
-                }
             }
 
-            // Lip Sync
+            // --- 3. LIP SYNC ---
             const mouthMax = parseFloat(ui.mouthAmp.value);
             state.morphMeshes.forEach(mesh => {
                 if (state.isPlaying) {
