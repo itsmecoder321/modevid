@@ -891,9 +891,24 @@
         }
 
         const clock = new THREE.Clock();
+        let lastFrameErrorLogged = false;
 
         function animate() {
             requestAnimationFrame(animate);
+            try {
+                animateFrame();
+            } catch (err) {
+                // Safety net: any future exception in here used to silently kill rendering
+                // for the rest of the session (this is exactly what the `talk` scope bug did).
+                // Now we log it once and keep the loop alive instead of going dark.
+                if (!lastFrameErrorLogged) {
+                    console.error('animate() frame error (rendering will keep trying):', err);
+                    lastFrameErrorLogged = true;
+                }
+            }
+        }
+
+        function animateFrame() {
             const delta = clock.getDelta();
             state.time += delta;
 
@@ -990,7 +1005,6 @@
                 // must always advance every frame regardless of that clamp.
                 const t = state.isPlaying ? state.timelineClock : state.time;
                 const swayAmp = parseFloat(ui.animSway.value) || 1.0;
-                const talk = state.speechEnergy;
 
                 // Eyes & Blinking
                 state.blinkTimer += delta;
@@ -1030,6 +1044,12 @@
 
             // --- 3. LIP SYNC ---
             const mouthMax = parseFloat(ui.mouthAmp.value) || 0.8;
+            const talk = state.speechEnergy; // moved out of the if(currentModel) block — was
+                                              // causing "ReferenceError: talk is not defined"
+                                              // inside this forEach every frame while playing,
+                                              // which aborted animate() before renderer.render()
+                                              // ever ran. That's why it looked frozen only during
+                                              // playback (browOuterUp line below needs `talk`).
             state.morphMeshes.forEach(mesh => {
                 if (state.isPlaying) {
                     const jaw = vocalEnergy * 2.5 * mouthMax; 
@@ -1046,20 +1066,6 @@
                 setMorphUniversal(mesh, ['eyeblinkright', 'blinkright', 'eyecloseright'], state.isBlinkingNow, 0.8); 
                 setMorphUniversal(mesh, ['blink', 'fcleyeclose', 'eyesclosed'], state.isBlinkingNow, 0.8); 
             });
-
-            // Live debug readout — if it's still a statue during play, check this line:
-            // if "clock" is not counting up, the rAF loop itself is stalled (not a pose bug).
-            // if "clock" counts up but "pose" values never change, the block/pose lookup is the issue.
-            if (ui.info) {
-                const dbg = document.getElementById('liveDebug') || (() => {
-                    const d = document.createElement('div');
-                    d.id = 'liveDebug';
-                    d.style.cssText = 'font-family:monospace;font-size:0.7em;color:#0f0;margin-top:4px;';
-                    ui.info.parentElement.appendChild(d);
-                    return d;
-                })();
-                dbg.innerText = `playing=${state.isPlaying} clock=${state.timelineClock.toFixed(2)} audioTime=${state.audioTime.toFixed(2)} lAP=${state.smoothPose.lAP.toFixed(2)} rAP=${state.smoothPose.rAP.toFixed(2)}`;
-            }
 
             if (currentModel) {
                 currentModel.updateMatrixWorld(true);
