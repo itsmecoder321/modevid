@@ -114,12 +114,17 @@
                 <input type="file" id="audioInput" accept="audio/*">
             </div>
 
+            <!-- RESTORED & FIXED POSITIONING CONTROLS -->
             <div class="panel-section">
                 <label style="color: var(--accent-color);">Framing & Positioning</label>
                 <button id="btnCenter" disabled>🎯 Auto Center & Fit</button>
                 <div class="row-group">
                     <div class="control-group" style="flex:1;"><label class="sub-label">Scale</label><input type="range" id="modScale" min="0.1" max="5" step="0.05" value="1"></div>
                     <div class="control-group" style="flex:1;"><label class="sub-label">Up / Down</label><input type="range" id="modPosY" min="-5" max="5" step="0.1" value="0"></div>
+                </div>
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Left / Right</label><input type="range" id="modPosX" min="-5" max="5" step="0.1" value="0"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Near / Far</label><input type="range" id="modPosZ" min="-5" max="5" step="0.1" value="0"></div>
                 </div>
             </div>
 
@@ -184,7 +189,7 @@
             <div class="panel-section" style="background-color: #e8f4fd; border-color: #b8daff;">
                 <label style="color: var(--accent-color);">➕ Save Pose to Timeline</label>
                 <div style="font-size: 0.75em; color: #495057; margin-bottom: 8px;">
-                    Move the Audio Slider (top) to your desired time, pose the avatar in the Pose Editor, and click Add.
+                    Move the Audio Slider to your desired time, shape the avatar in the Pose Editor, and click Save.
                 </div>
                 <div class="row-group">
                     <div class="control-group" style="flex: 1;">
@@ -236,7 +241,10 @@
             centerBtn: document.getElementById('btnCenter'), theme: document.getElementById('btnTheme'),
             container: document.getElementById('canvas-container'), info: document.getElementById('model-info'),
             mouthAmp: document.getElementById('mouthAmp'), animSway: document.getElementById('animSway'), animHead: document.getElementById('animHead'),
-            scale: document.getElementById('modScale'), posX: document.getElementById('modPosX'), posY: document.getElementById('modPosY'), posZ: document.getElementById('modPosZ'),
+            
+            // Fixed Positioning Binding
+            scale: document.getElementById('modScale'), posX: document.getElementById('modPosX'), 
+            posY: document.getElementById('modPosY'), posZ: document.getElementById('modPosZ'),
             
             // Audio Seek UI
             audioSeek: document.getElementById('audioSeek'), timeCur: document.getElementById('timeCurrent'), timeTot: document.getElementById('timeTotal'),
@@ -294,7 +302,7 @@
 
         ui.btnAddTl.addEventListener('click', () => {
             const time = parseFloat(ui.tlTime.value);
-            const poseCopy = { ...state.livePose }; // Save current slider state
+            const poseCopy = { ...state.livePose }; 
             const existing = state.timeline.findIndex(t => Math.abs(t.time - time) < 0.05);
             if(existing >= 0) state.timeline[existing].pose = poseCopy;
             else state.timeline.push({ time, pose: poseCopy });
@@ -307,11 +315,10 @@
             ui.tlTime.value = val.toFixed(2);
             ui.timeCur.innerText = val.toFixed(1) + 's';
             
-            // If playing, we must stop and restart the buffer node
             if (state.isPlaying) {
                 playAudioAt(val);
             } else {
-                state.audioTime = val; // Scrub timeline preview while paused
+                state.audioTime = val; 
             }
         });
 
@@ -338,7 +345,7 @@
         scene.add(keyLight);
         scene.add(new THREE.DirectionalLight(0xd0e0ff, 1.0)).position.set(-5, 3, 3);
 
-        let currentModel = null, audioContext, analyser, audioBuffer, mediaStreamDest, dataArray, sourceNode;
+        let currentModel = null, audioContext, analyser, audioBuffer, mediaStreamDest, dataArray, sourceNode, startTime = 0;
 
         function resize() {
             const parent = ui.container.parentElement;
@@ -355,9 +362,11 @@
         ui.res.addEventListener('change', e => { state.resolution = e.target.value === 'landscape' ? {w:1920, h:1080} : {w:1080, h:1920}; resize(); });
         ui.bg.addEventListener('input', e => scene.background.set(e.target.value));
 
+        // Fixed Auto-Center
         function centerAndFitModel() {
             if (!currentModel) return;
-            ui.scale.value = 1; ui.posX.value = 0; ui.posY.value = 0;
+            // Reset sliders properly
+            ui.scale.value = 1; ui.posX.value = 0; ui.posY.value = 0; ui.posZ.value = 0;
             modelGroup.scale.set(1, 1, 1); modelGroup.position.set(0, 0, 0);
 
             const box = new THREE.Box3().setFromObject(currentModel);
@@ -447,14 +456,12 @@
             sourceNode.buffer = audioBuffer;
             sourceNode.connect(analyser); analyser.connect(audioContext.destination); analyser.connect(mediaStreamDest);
             
-            // Record when we started relative to context time to track progress accurately
             startTime = audioContext.currentTime - offset; 
             sourceNode.start(0, offset);
             state.isPlaying = true; 
             ui.play.innerText = 'Pause Audio';
             
             sourceNode.onended = () => { 
-                // Only reset if it naturally reached the end, not if we manually seeked
                 if (state.isPlaying && (audioContext.currentTime - startTime) >= state.audioDuration - 0.1) { 
                     state.isPlaying = false; ui.play.innerText = 'Play Audio'; 
                     state.audioTime = 0; ui.audioSeek.value = 0;
@@ -492,21 +499,18 @@
             }
         }
 
-        // Sets a bone to an exact absolute pose offset, overriding procedural stuff
         function setBoneAbsolute(bone, x, y, z) {
             if (!bone || !state.initialBones[bone.name]) return;
             const offsetQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z));
             bone.quaternion.copy(state.initialBones[bone.name].q).multiply(offsetQ);
         }
 
-        // Adds procedural wiggle on top of an existing pose
         function applyAdditiveProcedural(bone, x, y, z) {
             if (!bone) return;
             const offsetQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z));
             bone.quaternion.multiply(offsetQ); 
         }
 
-        // The Engine: Calculates interpolated values between two keyframes based on current time
         function evaluateTimelinePose(time) {
             if (state.timeline.length === 0) return state.livePose;
             if (state.timeline.length === 1 || time <= state.timeline[0].time) return state.timeline[0].pose;
@@ -517,7 +521,7 @@
                     let k2 = state.timeline[i+1];
                     let alpha = (time - k1.time) / (k2.time - k1.time);
                     
-                    // Smoothstep for cinematic ease-in / ease-out
+                    // Smoothstep for cinematic ease-in / ease-out blending
                     alpha = alpha * alpha * (3 - 2 * alpha);
                     
                     let result = {};
@@ -527,7 +531,7 @@
                     return result;
                 }
             }
-            return state.timeline[state.timeline.length - 1].pose; // Hold last frame
+            return state.timeline[state.timeline.length - 1].pose;
         }
 
         const clock = new THREE.Clock();
@@ -537,13 +541,16 @@
             const delta = clock.getDelta();
             state.time += delta;
 
-            // Manual Positioning
+            // Safe Float Parsing for manual position to prevent corruption
             if (currentModel) {
-                modelGroup.scale.setScalar(parseFloat(ui.scale.value));
-                modelGroup.position.set(parseFloat(ui.posX.value), parseFloat(ui.posY.value), parseFloat(ui.posZ.value));
+                const scl = parseFloat(ui.scale.value) || 1;
+                const px = parseFloat(ui.posX.value) || 0;
+                const py = parseFloat(ui.posY.value) || 0;
+                const pz = parseFloat(ui.posZ.value) || 0;
+                modelGroup.scale.setScalar(scl);
+                modelGroup.position.set(px, py, pz);
             }
 
-            // Sync Audio Time
             let vocalEnergy = 0, highEnergy = 0;
             if (state.isPlaying && audioContext) {
                 state.audioTime = audioContext.currentTime - startTime;
@@ -561,23 +568,21 @@
                 state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, 0, 0.1);
             }
 
-            // --- 1. DETERMINE BASE POSE ---
-            // If playing or scrubbing timeline, use Timeline Evaluator.
-            // If user is just tweaking sliders, use Live Pose Editor.
+            // Determine Frame State
             let activePose = state.isPlaying ? evaluateTimelinePose(state.audioTime) : 
                              (ui.tabs[1].classList.contains('active') ? state.livePose : evaluateTimelinePose(state.audioTime));
 
             if (currentModel) {
-                // Apply Base Pose (Absolute Overrides)
+                // Apply Base Pose 
                 setBoneAbsolute(state.bones.lShoulder, activePose.lSP, 0, 0);
                 setBoneAbsolute(state.bones.lArm, activePose.lAP, 0, activePose.lAR);
                 setBoneAbsolute(state.bones.lFore, activePose.lFP, 0, 0);
                 
                 setBoneAbsolute(state.bones.rShoulder, activePose.rSP, 0, 0);
-                setBoneAbsolute(state.bones.rArm, activePose.rAP, 0, -activePose.rAR); // Mirrored visually
+                setBoneAbsolute(state.bones.rArm, activePose.rAP, 0, -activePose.rAR); 
                 setBoneAbsolute(state.bones.rFore, activePose.rFP, 0, 0);
 
-                // --- 2. LAYER PROCEDURAL LIFE ON TOP ---
+                // Layer Procedural Life
                 const t = state.time;
                 const swayAmp = parseFloat(ui.animSway.value);
                 const headAmp = parseFloat(ui.animHead.value);
@@ -602,7 +607,7 @@
                 setBoneAbsolute(state.bones.lEye, 0,0,0); applyAdditiveProcedural(state.bones.lEye, state.currentEyePos.y, state.currentEyePos.x, 0);
                 setBoneAbsolute(state.bones.rEye, 0,0,0); applyAdditiveProcedural(state.bones.rEye, state.currentEyePos.y, state.currentEyePos.x, 0);
 
-                // Core Body Sway (Breathing)
+                // Core Body Sway
                 if (state.bones.hips) {
                     const shiftX = Math.sin(t * 0.4) * 0.015 * swayAmp;
                     setBoneAbsolute(state.bones.hips, 0,0,0);
@@ -667,7 +672,6 @@
                 a.click(); URL.revokeObjectURL(url);
             };
             
-            // To record properly from start, force seek to 0 and play
             if (sourceNode) sourceNode.stop();
             state.audioTime = 0; ui.audioSeek.value = 0;
             mediaRecorder.start(); state.isRecording = true;
