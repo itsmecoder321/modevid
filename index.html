@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Explainer Avatar Studio</title>
+    <title>Pro Explainer Avatar Studio v3</title>
     <style>
         :root {
             --bg-color: #f4f4f9; --panel-bg: #ffffff; --text-color: #333333;
@@ -118,21 +118,21 @@
         <details>
             <summary>🦾 Manual Rig Overrides</summary>
             <div class="details-content">
-                <span style="font-size:0.7em; color:gray;">Use these to set the perfect "resting" pose. The explanatory animations will layer smoothly on top of these settings. (Symmetrical)</span>
+                <span style="font-size:0.7em; color:gray;">Set the resting pose. The arms will smoothly return to this exact pose when the avatar stops talking.</span>
                 
-                <label class="sub-label" style="color:var(--text-color); font-weight:bold; margin-top:5px;">Upper Arms</label>
+                <label class="sub-label" style="color:var(--text-color); font-weight:bold; margin-top:5px;">Upper Arms (Shoulder)</label>
                 <div class="row-group">
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Pitch (Fwd/Back)</label><input type="range" id="bArmP" min="-2" max="2" step="0.05" value="0.2"></div>
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Roll (Out/In)</label><input type="range" id="bArmR" min="-2" max="2" step="0.05" value="0"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Pitch (Fwd/Back)</label><input type="range" id="bArmP" min="-2" max="2" step="0.05" value="0.1"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Roll (Out/In)</label><input type="range" id="bArmR" min="-2" max="2" step="0.05" value="0.2"></div>
                 </div>
 
-                <label class="sub-label" style="color:var(--text-color); font-weight:bold; margin-top:5px;">Elbows / Forearms</label>
+                <label class="sub-label" style="color:var(--text-color); font-weight:bold; margin-top:5px;">Forearms (Elbow)</label>
                 <div class="row-group">
-                    <div class="control-group" style="flex:1;"><label class="sub-label">Bend (Pitch)</label><input type="range" id="bForeP" min="-2.5" max="2.5" step="0.05" value="0"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Bend (Pitch)</label><input type="range" id="bForeP" min="-2.5" max="2.5" step="0.05" value="0.1"></div>
                     <div class="control-group" style="flex:1;"><label class="sub-label">Twist (Yaw)</label><input type="range" id="bForeY" min="-2" max="2" step="0.05" value="0"></div>
                 </div>
 
-                <label class="sub-label" style="color:var(--text-color); font-weight:bold; margin-top:5px;">Wrists / Hands</label>
+                <label class="sub-label" style="color:var(--text-color); font-weight:bold; margin-top:5px;">Hands (Wrist)</label>
                 <div class="row-group">
                     <div class="control-group" style="flex:1;"><label class="sub-label">Flex (Pitch)</label><input type="range" id="bHandP" min="-1.5" max="1.5" step="0.05" value="0"></div>
                     <div class="control-group" style="flex:1;"><label class="sub-label">Wave (Roll)</label><input type="range" id="bHandR" min="-1.5" max="1.5" step="0.05" value="0"></div>
@@ -173,7 +173,7 @@
         const state = {
             isPlaying: false, isRecording: false, resolution: { w: 1920, h: 1080 },
             morphMeshes: [], bones: {}, initialBones: {},
-            time: 0, speechEnergy: 0, gestureActiveState: 0, // 0 = resting, 1 = explaining
+            time: 0, speechEnergy: 0, gestureActiveState: 0, // 0 = arms resting down, 1 = arms lifted explaining
             eyeTarget: new THREE.Vector2(0, 0), currentEyePos: new THREE.Vector2(0, 0), nextSaccadeTime: 0,
         };
 
@@ -186,7 +186,6 @@
             mouthAmp: document.getElementById('mouthAmp'), animGestures: document.getElementById('animGestures'), 
             animSway: document.getElementById('animSway'), animHead: document.getElementById('animHead'),
             scale: document.getElementById('modScale'), posX: document.getElementById('modPosX'), posY: document.getElementById('modPosY'), posZ: document.getElementById('modPosZ'),
-            // Rig Overrides
             bArmP: document.getElementById('bArmP'), bArmR: document.getElementById('bArmR'),
             bForeP: document.getElementById('bForeP'), bForeY: document.getElementById('bForeY'),
             bHandP: document.getElementById('bHandP'), bHandR: document.getElementById('bHandR')
@@ -281,10 +280,10 @@
                         else if (n.includes('head') && !n.includes('top')) state.bones.head = node;
                         else if (n.includes('leftarm') || n.includes('arm_l') || n.includes('upperarm_l')) state.bones.lArm = node;
                         else if (n.includes('rightarm') || n.includes('arm_r') || n.includes('upperarm_r')) state.bones.rArm = node;
-                        else if (n.includes('leftforearm') || n.includes('forearm_l')) state.bones.lFore = node;
-                        else if (n.includes('rightforearm') || n.includes('forearm_r')) state.bones.rFore = node;
-                        else if (n.includes('lefthand') || n.includes('hand_l')) state.bones.lHand = node;
-                        else if (n.includes('righthand') || n.includes('hand_r')) state.bones.rHand = node;
+                        else if (n.includes('leftforearm') || n.includes('forearm_l') || n.includes('elbow_l')) state.bones.lFore = node;
+                        else if (n.includes('rightforearm') || n.includes('forearm_r') || n.includes('elbow_r')) state.bones.rFore = node;
+                        else if (n.includes('lefthand') || n.includes('hand_l') || n.includes('wrist_l')) state.bones.lHand = node;
+                        else if (n.includes('righthand') || n.includes('hand_r') || n.includes('wrist_r')) state.bones.rHand = node;
                         else if (n.includes('lefteye') || n.includes('eye_l')) state.bones.lEye = node;
                         else if (n.includes('righteye') || n.includes('eye_r')) state.bones.rEye = node;
 
@@ -304,7 +303,7 @@
             if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
             audioContext.decodeAudioData(arrayBuffer, buffer => {
                 audioBuffer = buffer; analyser = audioContext.createAnalyser();
-                analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.6; // Slightly faster reaction for sharp sounds
+                analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.6;
                 dataArray = new Uint8Array(analyser.frequencyBinCount);
                 mediaStreamDest = audioContext.createMediaStreamDestination();
                 ui.play.disabled = false; if(currentModel) ui.rec.disabled = false;
@@ -327,6 +326,8 @@
         });
 
         function cleanName(n) { return n.toLowerCase().replace(/[^a-z0-9]/g, ''); }
+        
+        // Fixed: Does not return immediately, ensures both left and right eye arrays process fully if called together.
         function setMorphUniversal(mesh, searchNames, value, speed = 0.4) {
             if (!mesh.morphTargetDictionary) return;
             const keys = Object.keys(mesh.morphTargetDictionary);
@@ -334,10 +335,11 @@
                 const cleanSearch = cleanName(search);
                 for (const key of keys) {
                     const cleanKey = cleanName(key);
-                    if (cleanKey === cleanSearch || cleanKey.includes(cleanSearch)) {
+                    // Match exact or clearly contained shapes (prevents 'a' matching everything)
+                    if (cleanKey === cleanSearch || (cleanSearch.length > 2 && cleanKey.includes(cleanSearch))) {
                         const idx = mesh.morphTargetDictionary[key];
                         mesh.morphTargetInfluences[idx] = THREE.MathUtils.lerp(mesh.morphTargetInfluences[idx], Math.min(value, 1.0), speed);
-                        return;
+                        break; // Stop searching for this specific term, move to the next searchName
                     }
                 }
             }
@@ -381,18 +383,20 @@
             const swayAmp = parseFloat(ui.animSway.value);
             const headAmp = parseFloat(ui.animHead.value);
 
-            // Explainer State Logic (Smoothly raise hands when talking starts, lower when quiet)
-            if (talk > 0.05) {
-                state.gestureActiveState = THREE.MathUtils.lerp(state.gestureActiveState, 1.0, 0.05); // Smooth raise
+            // ACTIVE EXPLAINER STATE LOGIC
+            // When user is speaking loudly, smoothly transition to 1.0 (Arms Lifted & Bent)
+            // When user stops, smoothly transition back to 0.0 (Arms Straight Down)
+            if (talk > 0.08) {
+                state.gestureActiveState = THREE.MathUtils.lerp(state.gestureActiveState, 1.0, 0.05);
             } else {
-                state.gestureActiveState = THREE.MathUtils.lerp(state.gestureActiveState, 0.0, 0.02); // Slower drop
+                state.gestureActiveState = THREE.MathUtils.lerp(state.gestureActiveState, 0.0, 0.015); // Drop slower
             }
 
+            // Saccades (Eye movements)
             if (t > state.nextSaccadeTime) {
                 state.eyeTarget.x = (Math.random() - 0.5) * 0.4;
                 state.eyeTarget.y = (Math.random() - 0.5) * 0.2;
                 state.nextSaccadeTime = t + Math.random() * 2.5 + 0.5;
-                state.morphMeshes.forEach(m => setMorphUniversal(m, ['eyeblinkleft', 'eyeblinkright', 'blink', 'fcleyeclose'], 1.0, 0.8));
             }
             state.currentEyePos.lerp(state.eyeTarget, 0.1);
 
@@ -414,40 +418,49 @@
                 applyAdditiveRotation(state.bones.neck, nod + state.currentEyePos.y * 0.2, state.currentEyePos.x * 0.3, -swayX);
                 applyAdditiveRotation(state.bones.head, nod + state.currentEyePos.y * 0.3, state.currentEyePos.x * 0.4, 0);
 
-                // --- PRO EXPLAINER ARM LOGIC ---
-                // Base Manual Overrides
+                // --- ADVANCED ARM LIFTING & BENDING LOGIC ---
+                // Get the resting pose from UI controls
                 const bArmP = parseFloat(ui.bArmP.value); const bArmR = parseFloat(ui.bArmR.value);
                 const bForeP = parseFloat(ui.bForeP.value); const bForeY = parseFloat(ui.bForeY.value);
                 const bHandP = parseFloat(ui.bHandP.value); const bHandR = parseFloat(ui.bHandR.value);
 
-                // Explainer Lift Math
+                // Calculate the lift multiplier
                 const lift = state.gestureActiveState * gestAmp;
-                const chop = Math.sin(t * 4) * talk * 0.15 * gestAmp; // Hand emphasis on syllables
+                
+                // Micro-chops only happen when arms are physically lifted
+                const activeChop = talk * lift; 
+                const chopL = Math.sin(t * 5.2) * activeChop * 0.3;
+                const chopR = Math.sin(t * 4.8) * activeChop * 0.3;
 
-                // Left Arm
-                const lArmP = bArmP + (Math.sin(t * 1.2) * 0.05 * talk * gestAmp) + (lift * 0.2); // slight lift of shoulder
-                const lArmR = bArmR + (lift * 0.2); // open arm outward slightly to make chest room
-                const lForeP = bForeP + (lift * 1.2) + chop; // Bring hand up to chest + chop
-                const lForeY = bForeY + (lift * 0.3); // Turn palm inward/upward
-                const lHandP = bHandP - (lift * 0.2) + (Math.sin(t * 5) * talk * 0.05); // extend wrist open
+                // LEFT ARM Math
+                // At Rest (lift=0): Uses UI resting pose.
+                // At Action (lift=1): Lifts shoulder forward, bends elbow 90deg (1.5 rad), twists palm up.
+                const lArmP = bArmP + (lift * 0.6); // Lift forward
+                const lArmR = bArmR + (lift * 0.2) + (Math.sin(t * 1.5) * 0.05 * lift); // Open out to clear torso
+                const lForeP = bForeP + (lift * 1.5) + chopL; // Bend elbow straight up (1.5 rad = 85 deg)
+                const lForeY = bForeY + (lift * 0.4); // Twist palm inwards
+                const lHandP = bHandP - (lift * 0.2) + (Math.cos(t * 5.2) * activeChop * 0.2); // Flex wrist open
 
                 applyAdditiveRotation(state.bones.lArm, lArmP, 0, lArmR);
                 applyAdditiveRotation(state.bones.lFore, lForeP, lForeY, 0);
                 applyAdditiveRotation(state.bones.lHand, lHandP, 0, bHandR);
 
-                // Right Arm (Asymmetrical/Mirrored)
-                const rArmP = bArmP + (Math.cos(t * 1.5) * 0.05 * talk * gestAmp) + (lift * 0.2);
-                const rArmR = -bArmR - (lift * 0.2); // Negative for mirror
-                const rForeP = bForeP + (lift * 1.2) + (Math.cos(t * 4) * talk * 0.15 * gestAmp); // Asymmetrical chop
-                const rForeY = -bForeY - (lift * 0.3);
-                const rHandP = bHandP - (lift * 0.2) + (Math.cos(t * 5) * talk * 0.05);
+                // RIGHT ARM Math (Mirrored & Asymmetrical)
+                const rArmP = bArmP + (lift * 0.55); // Slightly different height for realism
+                const rArmR = -bArmR - (lift * 0.25) - (Math.cos(t * 1.4) * 0.05 * lift); // Negative = Mirrored Outward
+                const rForeP = bForeP + (lift * 1.4) + chopR; 
+                const rForeY = -bForeY - (lift * 0.4);
+                const rHandP = bHandP - (lift * 0.2) + (Math.cos(t * 4.8) * activeChop * 0.2);
 
                 applyAdditiveRotation(state.bones.rArm, rArmP, 0, rArmR);
                 applyAdditiveRotation(state.bones.rFore, rForeP, rForeY, 0);
                 applyAdditiveRotation(state.bones.rHand, rHandP, 0, -bHandR);
             }
 
-            // Universal Lip Sync
+            // Universal Lip Sync & Blinking Fix
+            // Determine if a random blink should happen right now
+            const isBlinking = t < (state.nextSaccadeTime - Math.random() * 2) && t > (state.nextSaccadeTime - Math.random() * 2.1) ? 1.0 : 0.0;
+            
             state.morphMeshes.forEach(mesh => {
                 if (state.isPlaying) {
                     const jaw = vocalEnergy * 2.5 * mouthMax; 
@@ -460,7 +473,11 @@
                     setMorphUniversal(mesh, ['mouthsmileleft', 'mouthsmileright', 'smile', 'fclmthe', 'e', 'ee'], 0.05, 0.1);
                     setMorphUniversal(mesh, ['browinnerup', 'browouterup', 'browsup', 'surprised'], 0, 0.1);
                 }
-                setMorphUniversal(mesh, ['eyeblinkleft', 'eyeblinkright', 'blink', 'fcleyeclose'], 0, 0.15); 
+                
+                // Fixed explicit calls for left, right, and combined blinks
+                setMorphUniversal(mesh, ['eyeblinkleft', 'blinkleft', 'eyecloseleft'], isBlinking, 0.6); 
+                setMorphUniversal(mesh, ['eyeblinkright', 'blinkright', 'eyecloseright'], isBlinking, 0.6); 
+                setMorphUniversal(mesh, ['blink', 'fcleyeclose', 'eyesclosed'], isBlinking, 0.6); 
             });
 
             controls.update(); renderer.render(scene, camera);
