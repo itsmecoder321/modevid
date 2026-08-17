@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Explainer Avatar Studio v4</title>
+    <title>Pro Explainer Avatar Studio v5 (Looping Gestures)</title>
     <style>
         :root {
             --bg-color: #f4f4f9; --panel-bg: #ffffff; --text-color: #333333;
@@ -96,7 +96,7 @@
         <details open>
             <summary>🗣️ Explainer Animations</summary>
             <div class="details-content">
-                <label class="sub-label">Hand Gestures Intensity (Shoulder/Arm Lift & Chop)</label>
+                <label class="sub-label">Hand Gestures Intensity (Automatic Looping)</label>
                 <input type="range" id="animGestures" min="0" max="3" step="0.1" value="1.0">
                 
                 <div class="row-group">
@@ -118,7 +118,7 @@
         <details>
             <summary>🦾 Manual Rig Overrides</summary>
             <div class="details-content">
-                <span style="font-size:0.7em; color:gray;">Set the <b>Resting Pose</b>. The arms will drop back to this exact position when the avatar pauses talking.</span>
+                <span style="font-size:0.7em; color:gray;">Set the <b>Resting Pose</b>. The arms will drop back to this exact position when resting in the loop.</span>
                 
                 <label class="sub-label" style="color:var(--text-color); font-weight:bold; margin-top:5px;">Shoulders (Clavicle)</label>
                 <div class="row-group">
@@ -179,9 +179,15 @@
         const state = {
             isPlaying: false, isRecording: false, resolution: { w: 1920, h: 1080 },
             morphMeshes: [], bones: {}, initialBones: {},
-            time: 0, speechEnergy: 0, gestureActiveState: 0, 
+            time: 0, speechEnergy: 0, 
+            
+            // The Automatic Loop Engine
+            targetGestureState: 0, 
+            gestureActiveState: 0, 
+            gesturePhaseTimer: 0,
+            gestureNextPhaseTarget: 0.5,
+
             eyeTarget: new THREE.Vector2(0, 0), currentEyePos: new THREE.Vector2(0, 0), nextSaccadeTime: 0,
-            // Dedicated Blink Engine
             blinkTimer: 0, nextBlinkTime: 2.0, isBlinkingNow: 0
         };
 
@@ -288,10 +294,8 @@
                         else if (n.includes('spine') && !n.includes('1') && !n.includes('2')) state.bones.spine = node;
                         else if (n.includes('neck')) state.bones.neck = node;
                         else if (n.includes('head') && !n.includes('top')) state.bones.head = node;
-                        // Map Shoulders (Crucial for realistic lifts)
                         else if (n.includes('leftshoulder') || n.includes('shoulder_l') || n.includes('clavicle_l')) state.bones.lShoulder = node;
                         else if (n.includes('rightshoulder') || n.includes('shoulder_r') || n.includes('clavicle_r')) state.bones.rShoulder = node;
-                        // Arms
                         else if (n.includes('leftarm') || n.includes('arm_l') || n.includes('upperarm_l')) state.bones.lArm = node;
                         else if (n.includes('rightarm') || n.includes('arm_r') || n.includes('upperarm_r')) state.bones.rArm = node;
                         else if (n.includes('leftforearm') || n.includes('forearm_l') || n.includes('elbow_l')) state.bones.lFore = node;
@@ -383,7 +387,7 @@
                 vocalEnergy = (vocalEnergy / 18) / 255;
                 for (let i = 20; i < 60; i++) highEnergy += dataArray[i];
                 highEnergy = (highEnergy / 40) / 255;
-                state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, vocalEnergy, 0.15); // Slightly smoother
+                state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, vocalEnergy, 0.15);
             } else {
                 state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, 0, 0.1);
             }
@@ -395,25 +399,40 @@
             const swayAmp = parseFloat(ui.animSway.value);
             const headAmp = parseFloat(ui.animHead.value);
 
-            // ACTIVE EXPLAINER STATE LOGIC (Smooth transition between resting and explaining)
-            if (talk > 0.05) {
-                state.gestureActiveState = THREE.MathUtils.lerp(state.gestureActiveState, 1.0, 0.04);
+            // --- THE LOOPING GESTURE ENGINE ---
+            // If they are speaking, constantly cycle between 1.0 (Arms up) and 0.0 (Arms down)
+            if (talk > 0.08) {
+                state.gesturePhaseTimer += delta;
+                if (state.gesturePhaseTimer > state.gestureNextPhaseTarget) {
+                    // Time to flip the state
+                    state.targetGestureState = state.targetGestureState === 0 ? 1 : 0;
+                    state.gesturePhaseTimer = 0;
+                    
+                    // Generate a random duration for the next phase (e.g., talk with hands up for 2 to 4 seconds)
+                    state.gestureNextPhaseTarget = Math.random() * 2.0 + 2.0; 
+                }
             } else {
-                state.gestureActiveState = THREE.MathUtils.lerp(state.gestureActiveState, 0.0, 0.02);
+                // If they stop speaking entirely, drop arms immediately for the next loop
+                state.targetGestureState = 0;
+                state.gesturePhaseTimer = 0;
+                state.gestureNextPhaseTarget = 0.5; // Next time they speak, lift arms almost instantly
             }
 
-            // --- PROPER BLINKING ENGINE ---
+            // Smoothly interpolate the actual physical arms to match the target state
+            state.gestureActiveState = THREE.MathUtils.lerp(state.gestureActiveState, state.targetGestureState, 0.03);
+
+            // Blinking Engine
             state.blinkTimer += delta;
             if (state.blinkTimer > state.nextBlinkTime) {
                 const blinkProgress = state.blinkTimer - state.nextBlinkTime;
                 if (blinkProgress < 0.05) {
-                    state.isBlinkingNow = blinkProgress / 0.05; // Close fast
+                    state.isBlinkingNow = blinkProgress / 0.05; 
                 } else if (blinkProgress < 0.15) {
-                    state.isBlinkingNow = 1.0 - ((blinkProgress - 0.05) / 0.10); // Open slower
+                    state.isBlinkingNow = 1.0 - ((blinkProgress - 0.05) / 0.10); 
                 } else {
                     state.isBlinkingNow = 0;
                     state.blinkTimer = 0;
-                    state.nextBlinkTime = Math.random() * 4.0 + 2.0; // Wait 2 to 6 seconds before next blink
+                    state.nextBlinkTime = Math.random() * 4.0 + 2.0; 
                 }
             }
 
@@ -422,10 +441,7 @@
                 state.eyeTarget.x = (Math.random() - 0.5) * 0.4;
                 state.eyeTarget.y = (Math.random() - 0.5) * 0.2;
                 state.nextSaccadeTime = t + Math.random() * 2.5 + 0.5;
-                // Force a blink when eyes dart around (natural human behavior)
-                if (state.blinkTimer < state.nextBlinkTime - 0.5) {
-                    state.nextBlinkTime = state.blinkTimer;
-                }
+                if (state.blinkTimer < state.nextBlinkTime - 0.5) state.nextBlinkTime = state.blinkTimer; // Force blink on look
             }
             state.currentEyePos.lerp(state.eyeTarget, 0.1);
 
@@ -447,50 +463,58 @@
                 applyAdditiveRotation(state.bones.neck, nod + state.currentEyePos.y * 0.2, state.currentEyePos.x * 0.3, -swayX);
                 applyAdditiveRotation(state.bones.head, nod + state.currentEyePos.y * 0.3, state.currentEyePos.x * 0.4, 0);
 
-                // --- ADVANCED ARM LIFTING & BENDING LOGIC ---
+                // --- ADVANCED ELBOW TWISTING & ARM LIFTING LOGIC ---
                 const bShoulderP = parseFloat(ui.bShoulderP.value); const bShoulderR = parseFloat(ui.bShoulderR.value);
                 const bArmP = parseFloat(ui.bArmP.value); const bArmR = parseFloat(ui.bArmR.value);
                 const bForeP = parseFloat(ui.bForeP.value); const bForeY = parseFloat(ui.bForeY.value);
                 const bHandP = parseFloat(ui.bHandP.value); const bHandR = parseFloat(ui.bHandR.value);
 
-                // The master "Explain" curve. Multiplies by the user slider.
                 const lift = state.gestureActiveState * gestAmp;
                 
-                // Emphasized chopping on strong vocal beats
-                const activeChop = talk * lift; 
-                const chopL = Math.sin(t * 5.2) * activeChop * 0.4;
-                const chopR = Math.sin(t * 4.8) * activeChop * 0.4;
+                // Continuous, sweeping waves to make the elbows constantly twist and straighten dynamically
+                const armSweep = Math.sin(t * 1.5) * lift * 0.15; // Slow breathing sweep
+                const elbowTwistL = Math.cos(t * 2.8) * lift * 0.4; // Constant twisting motion
+                const elbowTwistR = Math.cos(t * 2.6) * lift * 0.4; // Constant twisting motion
+                const elbowStraightenL = Math.sin(t * 2.2) * lift * 0.3; // Constant in/out motion
+                const elbowStraightenR = Math.sin(t * 2.0) * lift * 0.3; // Constant in/out motion
 
-                // SHOULDERS: Shrug up slightly when explaining (Humanizes the gesture)
-                const shoulderLiftP = lift * 0.15; // Lift up
-                const shoulderLiftR = lift * 0.05; // Push slightly forward
+                // Syllable chopping for emphasis
+                const activeChop = talk * lift; 
+                const chopL = Math.sin(t * 5.2) * activeChop * 0.3;
+                const chopR = Math.sin(t * 4.8) * activeChop * 0.3;
+
+                // SHOULDERS
+                const shoulderLiftP = lift * 0.15; 
+                const shoulderLiftR = lift * 0.05; 
                 applyAdditiveRotation(state.bones.lShoulder, bShoulderP + shoulderLiftP, 0, bShoulderR + shoulderLiftR);
-                applyAdditiveRotation(state.bones.rShoulder, bShoulderP + shoulderLiftP, 0, -bShoulderR - shoulderLiftR); // Mirror
+                applyAdditiveRotation(state.bones.rShoulder, bShoulderP + shoulderLiftP, 0, -bShoulderR - shoulderLiftR); 
 
                 // LEFT ARM
-                const lArmP = bArmP + (lift * 0.4); // Move forward
-                const lArmR = bArmR + (lift * 0.3) + (Math.sin(t * 1.5) * 0.05 * lift); // Open out 
-                const lForeP = bForeP + (lift * 1.6) + chopL; // Bend elbow dramatically (1.6 rad ~ 90 deg)
-                const lForeY = bForeY + (lift * 0.5); // Twist palm inwards towards chest
-                const lHandP = bHandP - (lift * 0.3) + (Math.cos(t * 5.2) * activeChop * 0.3); // Flex wrist
+                const lArmP = bArmP + (lift * 0.4) + armSweep; // Sweep forward/backward
+                const lArmR = bArmR + (lift * 0.3) + (Math.sin(t * 1.5) * 0.1 * lift); 
+                // Elbow: Bend dramatically, then actively straighten/bend using the wave
+                const lForeP = bForeP + (lift * 1.5) + chopL - elbowStraightenL; 
+                // Elbow: Constantly twist inward/outward
+                const lForeY = bForeY + (lift * 0.4) + elbowTwistL; 
+                const lHandP = bHandP - (lift * 0.3) + chopL; 
 
                 applyAdditiveRotation(state.bones.lArm, lArmP, 0, lArmR);
                 applyAdditiveRotation(state.bones.lFore, lForeP, lForeY, 0);
                 applyAdditiveRotation(state.bones.lHand, lHandP, 0, bHandR);
 
                 // RIGHT ARM (Mirrored)
-                const rArmP = bArmP + (lift * 0.35); // Slight asymmetry
-                const rArmR = -bArmR - (lift * 0.35) - (Math.cos(t * 1.4) * 0.05 * lift); // Negative = Mirrored Outward
-                const rForeP = bForeP + (lift * 1.5) + chopR; 
-                const rForeY = -bForeY - (lift * 0.5);
-                const rHandP = bHandP - (lift * 0.3) + (Math.cos(t * 4.8) * activeChop * 0.3);
+                const rArmP = bArmP + (lift * 0.35) - armSweep; // Asymmetrical sweep
+                const rArmR = -bArmR - (lift * 0.35) - (Math.cos(t * 1.4) * 0.1 * lift); 
+                const rForeP = bForeP + (lift * 1.4) + chopR + elbowStraightenR; 
+                const rForeY = -bForeY - (lift * 0.4) - elbowTwistR;
+                const rHandP = bHandP - (lift * 0.3) + chopR;
 
                 applyAdditiveRotation(state.bones.rArm, rArmP, 0, rArmR);
                 applyAdditiveRotation(state.bones.rFore, rForeP, rForeY, 0);
                 applyAdditiveRotation(state.bones.rHand, rHandP, 0, -bHandR);
             }
 
-            // Universal Lip Sync & Fixed Blinking
+            // Lip Sync & Blinking
             state.morphMeshes.forEach(mesh => {
                 if (state.isPlaying) {
                     const jaw = vocalEnergy * 2.5 * mouthMax; 
@@ -504,7 +528,6 @@
                     setMorphUniversal(mesh, ['browinnerup', 'browouterup', 'browsup', 'surprised'], 0, 0.1);
                 }
                 
-                // Fixed Blinking Engine Applied Here
                 setMorphUniversal(mesh, ['eyeblinkleft', 'blinkleft', 'eyecloseleft'], state.isBlinkingNow, 0.8); 
                 setMorphUniversal(mesh, ['eyeblinkright', 'blinkright', 'eyecloseright'], state.isBlinkingNow, 0.8); 
                 setMorphUniversal(mesh, ['blink', 'fcleyeclose', 'eyesclosed'], state.isBlinkingNow, 0.8); 
