@@ -911,6 +911,14 @@
         function animateFrame() {
             const delta = clock.getDelta();
             state.time += delta;
+            let talk = state.speechEnergy; // declared once, at top of frame, so it's in scope
+                                            // for BOTH the body-sway code and the lip-sync code
+                                            // below (previously this was declared mid-function,
+                                            // causing either an out-of-scope ReferenceError or a
+                                            // temporal-dead-zone ReferenceError depending on where
+                                            // it sat — both silently killed rendering every frame
+                                            // during playback). Reassigned below once the real
+                                            // per-frame speechEnergy value is calculated.
 
             if (currentModel) {
                 modelGroup.scale.setScalar(parseFloat(ui.scale.value) || 1);
@@ -959,6 +967,7 @@
             } else {
                 state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, 0, 0.1);
             }
+            talk = state.speechEnergy;
 
             // --- 1. DETERMINE TARGET POSE & LERP ---
             const poseClock = state.isPlaying ? state.timelineClock : state.audioTime;
@@ -1044,12 +1053,6 @@
 
             // --- 3. LIP SYNC ---
             const mouthMax = parseFloat(ui.mouthAmp.value) || 0.8;
-            const talk = state.speechEnergy; // moved out of the if(currentModel) block — was
-                                              // causing "ReferenceError: talk is not defined"
-                                              // inside this forEach every frame while playing,
-                                              // which aborted animate() before renderer.render()
-                                              // ever ran. That's why it looked frozen only during
-                                              // playback (browOuterUp line below needs `talk`).
             state.morphMeshes.forEach(mesh => {
                 if (state.isPlaying) {
                     const jaw = vocalEnergy * 2.5 * mouthMax; 
