@@ -294,6 +294,7 @@
             isPlaying: false, isRecording: false, resolution: { w: 1920, h: 1080 },
             morphMeshes: [], bones: {}, initialBones: {},
             time: 0, audioTime: 0, audioDuration: 10.0, speechEnergy: 0,
+            playStartWallTime: 0, playStartTimeline: 0,
             eyeTarget: new THREE.Vector2(0, 0), currentEyePos: new THREE.Vector2(0, 0), nextSaccadeTime: 0,
             blinkTimer: 0, nextBlinkTime: 2.0, isBlinkingNow: 0,
             
@@ -437,47 +438,158 @@
             });
         });
 
-        // --- THE DECOUPLED AUDIO ENGINE ---
-        function seekAudio(time) {
-            state.audioTime = time;
-            ui.audioSeek.value = time;
-            ui.timeCur.innerText = time.toFixed(1) + 's';
-            if (state.isPlaying && audioBuffer) {
-                playAudioNodeAt(time);
+        // ============================================================
+        // SYNCHRONIZED AUDIO + TIMELINE ENGINE
+        // HTMLAudioElement is the single source of truth for time.
+        // ============================================================
+        let audioElement = new Audio();
+        audioElement.preload = 'auto';
+        audioElement.playsInline = true;
+        let audioObjectUrl = null;
+        let audioMediaSource = null;
+        let audioGraphReady = false;
+
+        function getTimelineDuration() {
+            const audioDurationValue =
+                Number.isFinite(audioElement.duration) && audioElement.duration > 0
+                    ? audioElement.duration
+                    : 0;
+
+            const blockDuration = state.blocks.length
+                ? Math.max(...state.blocks.map(b => Number(b.end) || 0))
+                : 0;
+
+            return Math.max(audioDurationValue, blockDuration, 0);
+        }
+
+        function updateAudioUI(time) {
+            const duration = getTimelineDuration();
+            ui.audioSeek.max = Math.max(duration, 0.01);
+            ui.audioSeek.value = Math.min(Math.max(time, 0), duration || 0);
+            ui.timeCur.innerText = `${Math.max(0, time).toFixed(1)}s`;
+            ui.timeTot.innerText = `${Math.max(0, duration).toFixed(1)}s`;
+        }
+
+        async function setupAudioGraph() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
             }
+
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+
+            if (!audioGraphReady) {
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 1024;
+                analyser.smoothingTimeConstant = 0.65;
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                mediaStreamDest = audioContext.createMediaStreamDestination();
+                audioMediaSource = audioContext.createMediaElementSource(audioElement);
+                audioMediaSource.connect(analyser);
+                analyser.connect(audioContext.destination);
+                analyser.connect(mediaStreamDest);
+                audioGraphReady = true;
+            }
+        }
+
+        function applyTimelinePoseInstant(time) {
+            const targetPose = getTargetPoseAtTime(time);
+            for (const key of Object.keys(state.smoothPose)) {
+                const value = targetPose[key] !== undefined && Number.isFinite(Number(targetPose[key]))
+                    ? Number(targetPose[key])
+                    : 0;
+                state.smoothPose[key] = value;
+            }
+        }
+
+        function seekAudio(time) {
+            const duration =
+                Number.isFinite(audioElement.duration) && audioElement.duration > 0
+                    ? audioElement.duration
+                    : getTimelineDuration();
+
+            const target = THREE.MathUtils.clamp(Number(time) || 0, 0, Math.max(duration, 0));
+            state.audioTime = target;
+
+            if (audioElement.src) {
+                try { audioElement.currentTime = target; }
+                catch (err) { console.warn('Audio seek failed:', err); }
+            }
+
+            updateAudioUI(target);
+            if (!state.isPlaying) applyTimelinePoseInstant(target);
         }
 
         ui.audioSeek.addEventListener('input', (e) => { seekAudio(parseFloat(e.target.value)); });
 
-        function playAudioNodeAt(offset) {
-            if (!audioBuffer) return;
-            if (sourceNode) { try{sourceNode.stop(); sourceNode.disconnect();}catch(e){} }
-            sourceNode = audioContext.createBufferSource(); 
-            sourceNode.buffer = audioBuffer;
-            sourceNode.connect(analyser); analyser.connect(audioContext.destination); analyser.connect(mediaStreamDest);
-            sourceNode.start(0, offset);
+        async function startTimelinePlayback() {
+            if (state.isPlaying) return;
+            await setupAudioGraph();
+
+            const duration = getTimelineDuration();
+            if (state.audioTime >= duration - 0.02) {
+                seekAudio(0);
+            }
+
+            if (state.editingBlockId) closePoseEditor();
+
+            state.playStartTimeline = state.audioTime;
+            state.playStartWallTime = performance.now();
+            state.isPlaying = true;
+            ui.play.innerText = 'Pause Timeline';
+
+            if (audioElement.src) {
+                try {
+                    await audioElement.play();
+                } catch (err) {
+                    console.error('Audio playback failed:', err);
+                    state.isPlaying = false;
+                    ui.play.innerText = 'Play Timeline';
+                    alert('Audio playback could not start. Click Play again and make sure the browser allows audio playback.');
+                }
+            }
         }
 
-        function stopPlayback() {
-            state.isPlaying = false; 
+        function stopPlayback(resetPosition = false) {
+            state.isPlaying = false;
             ui.play.innerText = 'Play Timeline';
-            if (sourceNode) { try{sourceNode.stop();}catch(e){} }
+
+            if (audioElement.src) {
+                try { audioElement.pause(); } catch (err) {}
+            }
+
+            if (resetPosition) seekAudio(0);
         }
+
+        audioElement.addEventListener('loadedmetadata', () => {
+            state.audioDuration = Number.isFinite(audioElement.duration) ? audioElement.duration : 0;
+            ui.audioSeek.max = Math.max(getTimelineDuration(), 0.01);
+            ui.audioSeek.disabled = false;
+            updateAudioUI(audioElement.currentTime || 0);
+        });
+
+        audioElement.addEventListener('durationchange', () => {
+            ui.audioSeek.max = Math.max(getTimelineDuration(), 0.01);
+            updateAudioUI(audioElement.currentTime || 0);
+        });
+
+        audioElement.addEventListener('timeupdate', () => {
+            if (!state.isPlaying) return;
+            state.audioTime = audioElement.currentTime;
+            updateAudioUI(state.audioTime);
+        });
+
+        audioElement.addEventListener('ended', () => {
+            if (state.isRecording) return;
+            state.audioTime = getTimelineDuration();
+            updateAudioUI(state.audioTime);
+            stopPlayback(false);
+        });
 
         ui.play.addEventListener('click', async () => {
-            if (audioContext && audioContext.state === 'suspended') await audioContext.resume();
-            
-            if (state.isPlaying) {
-                stopPlayback();
-            } else {
-                state.isPlaying = true; 
-                ui.play.innerText = 'Pause Timeline';
-                
-                // CRITICAL FIX: Unlock the editor preview during playback so timeline resolves properly
-                if (state.editingBlockId) closePoseEditor(); 
-                
-                if (audioBuffer) playAudioNodeAt(state.audioTime);
-            }
+            if (state.isPlaying) stopPlayback(false);
+            else await startTimelinePlayback();
         });
 
         // --- THREE.JS SCENE ---
@@ -503,7 +615,7 @@
         scene.add(keyLight);
         scene.add(new THREE.DirectionalLight(0xd0e0ff, 1.0)).position.set(-5, 3, 3);
 
-        let currentModel = null, audioContext, analyser, audioBuffer, mediaStreamDest, dataArray, sourceNode;
+        let currentModel = null, audioContext, analyser, audioBuffer, mediaStreamDest, dataArray;
 
         function resize() {
             const parent = ui.container.parentElement;
@@ -591,20 +703,28 @@
         });
 
         ui.audio.addEventListener('change', async e => {
-            const arrayBuffer = await e.target.files[0].arrayBuffer();
-            if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            audioContext.decodeAudioData(arrayBuffer, buffer => {
-                audioBuffer = buffer; 
-                state.audioDuration = buffer.duration;
-                ui.audioSeek.max = state.audioDuration + 2.0; // Allow seeking past audio slightly
-                ui.audioSeek.disabled = false;
-                ui.timeTot.innerText = state.audioDuration.toFixed(1) + 's';
-                
-                analyser = audioContext.createAnalyser();
-                analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.6;
-                dataArray = new Uint8Array(analyser.frequencyBinCount);
-                mediaStreamDest = audioContext.createMediaStreamDestination();
-            });
+            const file = e.target.files?.[0];
+            if (!file) return;
+
+            try {
+                stopPlayback(false);
+
+                if (audioObjectUrl) {
+                    URL.revokeObjectURL(audioObjectUrl);
+                    audioObjectUrl = null;
+                }
+
+                audioObjectUrl = URL.createObjectURL(file);
+                audioElement.src = audioObjectUrl;
+                audioElement.load();
+                await setupAudioGraph();
+
+                ui.info.innerHTML = `<span class="success">Audio loaded: ${file.name}</span>`;
+                console.log('Audio loaded:', file.name, file.size, 'bytes');
+            } catch (error) {
+                console.error('Audio initialization failed:', error);
+                alert('Could not initialize the audio file.\n\n' + error.message);
+            }
         });
 
         // --- MATH ENGINE ---
@@ -636,22 +756,28 @@
             bone.quaternion.multiply(offsetQ); 
         }
 
-        // --- BULLETPROOF TIMELINE RESOLVER ---
+        // ============================================================
+        // TIMELINE RESOLVER
+        // ============================================================
         function getTargetPoseAtTime(t) {
-            // Priority 1: Editor Lock (ONLY if paused)
             if (state.editingBlockId && !state.isPlaying) {
-                const b = state.blocks.find(x => x.id === state.editingBlockId);
-                if (b) return { ...BaseRest, ...b.customPose };
+                const editingBlock = state.blocks.find(x => x.id === state.editingBlockId);
+                if (editingBlock) return { ...BaseRest, ...editingBlock.customPose };
             }
-            
-            // Priority 2: Timeline Blocks
-            let target = BaseRest;
-            for (let i = 0; i < state.blocks.length; i++) {
-                if (t >= state.blocks[i].start && t <= state.blocks[i].end) {
-                    target = { ...BaseRest, ...state.blocks[i].customPose };
+
+            let activeBlock = null;
+            for (const block of state.blocks) {
+                const start = Number(block.start);
+                const end = Number(block.end);
+                if (Number.isFinite(start) && Number.isFinite(end) && t >= start && t < end) {
+                    activeBlock = block;
+                    break;
                 }
             }
-            return target; 
+
+            return activeBlock
+                ? { ...BaseRest, ...activeBlock.customPose }
+                : { ...BaseRest };
         }
 
         const clock = new THREE.Clock();
@@ -666,22 +792,26 @@
                 modelGroup.position.set(parseFloat(ui.posX.value)||0, parseFloat(ui.posY.value)||0, parseFloat(ui.posZ.value)||0);
             }
 
-            // CRITICAL FIX: The Decoupled Clock. It always advances visually when playing.
+            // ========================================================
+            // MASTER TIMELINE CLOCK
+            // Audio currentTime drives the animation whenever audio exists.
+            // ========================================================
             if (state.isPlaying) {
-                state.audioTime += delta;
-                
-                // Determine when to fully stop playback
-                let maxTime = state.audioDuration > 0 ? state.audioDuration : 10.0;
-                if (state.isRecording) maxTime += 2.0; // The 2-second tail logic to prevent cutoff
-
-                if (state.audioTime >= maxTime) {
-                    stopPlayback();
-                    state.audioTime = 0; // Reset to 0 when finished
-                    if (state.isRecording) stopRecording();
+                if (audioElement.src) {
+                    state.audioTime = audioElement.currentTime;
+                } else if (state.playStartWallTime !== undefined) {
+                    state.audioTime =
+                        state.playStartTimeline +
+                        (performance.now() - state.playStartWallTime) / 1000;
                 }
 
-                ui.audioSeek.value = state.audioTime;
-                ui.timeCur.innerText = state.audioTime.toFixed(1) + 's';
+                const timelineDuration = getTimelineDuration();
+                if (!state.isRecording && timelineDuration > 0 && state.audioTime >= timelineDuration) {
+                    state.audioTime = timelineDuration;
+                    stopPlayback(false);
+                }
+
+                updateAudioUI(state.audioTime);
             }
 
             let vocalEnergy = 0, highEnergy = 0;
@@ -699,10 +829,14 @@
             // --- 1. DETERMINE TARGET POSE & LERP ---
             const targetPose = getTargetPoseAtTime(state.audioTime);
             
+            const poseSmoothing = state.isPlaying ? 8.0 : 20.0;
+            const poseAlpha = Math.min(1, delta * poseSmoothing);
+
             for (let key in state.smoothPose) {
-                // If a key is completely missing from a bad array, fallback to 0 to prevent NaN poisoning
-                const tgt = targetPose[key] !== undefined && !isNaN(targetPose[key]) ? targetPose[key] : 0; 
-                state.smoothPose[key] = THREE.MathUtils.lerp(state.smoothPose[key], tgt, delta * 8.0);
+                const tgt = targetPose[key] !== undefined && Number.isFinite(Number(targetPose[key]))
+                    ? Number(targetPose[key])
+                    : 0;
+                state.smoothPose[key] = THREE.MathUtils.lerp(state.smoothPose[key], tgt, poseAlpha);
             }
 
             if (currentModel) {
@@ -782,62 +916,267 @@
         }
         animate();
 
-        // --- DEEP EXPORT FIX (Deep Buffer & Fallbacks) ---
-        let mediaRecorder, chunks = [];
-        ui.rec.addEventListener('click', () => state.isRecording ? stopRecording() : startRecording());
+        // ============================================================
+        // ROBUST VIDEO EXPORT ENGINE
+        // ============================================================
+        let mediaRecorder = null;
+        let recordingChunks = [];
+        let exportCanvasStream = null;
+        let exportStream = null;
+        let exportMonitorTimer = null;
 
-        function startRecording() {
-            if (!currentModel) return alert("Please load a model first.");
-            chunks = [];
-            
-            // 1. Reset timeline completely
-            stopPlayback();
-            state.audioTime = 0; ui.audioSeek.value = 0;
-            
-            // 2. Setup the export stream
-            const canvasStream = renderer.domElement.captureStream(30); 
-            const audioTracks = mediaStreamDest ? mediaStreamDest.stream.getAudioTracks() : [];
-            const stream = new MediaStream([...canvasStream.getVideoTracks(), ...audioTracks]);
-            
-            const types = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
-            let options = {};
-            for (let t of types) {
-                if (MediaRecorder.isTypeSupported(t)) {
-                    options = { mimeType: t, videoBitsPerSecond: 8000000 };
-                    break;
+        function getSupportedRecordingFormat() {
+            const candidates = [
+                { mimeType: 'video/webm;codecs=vp9,opus', extension: 'webm', videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 },
+                { mimeType: 'video/webm;codecs=vp8,opus', extension: 'webm', videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 },
+                { mimeType: 'video/webm', extension: 'webm', videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 },
+                { mimeType: 'video/mp4', extension: 'mp4', videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 }
+            ];
+
+            for (const candidate of candidates) {
+                if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(candidate.mimeType)) {
+                    return candidate;
                 }
             }
 
-            try { mediaRecorder = new MediaRecorder(stream, options); } 
-            catch (e) { mediaRecorder = new MediaRecorder(stream); }
-
-            mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
-            mediaRecorder.onstop = () => {
-                const blob = new Blob(chunks, { type: mediaRecorder.mimeType });
-                if (blob.size < 1000) { alert("Export failed (file too small). Ensure the tab stays active while recording."); return; }
-                
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a'); a.href = url;
-                a.download = `avatar_cinematic.webm`;
-                a.click(); URL.revokeObjectURL(url);
-            };
-            
-            // 3. Deep Buffer: Give canvas 300ms to push frames before recording starts to prevent 138-byte crash
-            setTimeout(() => {
-                mediaRecorder.start(500); 
-                state.isRecording = true;
-                ui.rec.innerText = 'Stop & Export'; ui.rec.style.backgroundColor = '#6c757d';
-                
-                // Start playback and let the `animate` loop handle the auto-stop
-                state.isPlaying = true;
-                if (audioBuffer) playAudioNodeAt(0); 
-            }, 300);
+            return { mimeType: '', extension: 'webm', videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 };
         }
-        
-        function stopRecording() {
-            if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
-            state.isRecording = false; 
-            ui.rec.innerText = 'Record & Export Video'; ui.rec.style.backgroundColor = 'var(--danger-color)';
+
+        function validateRecordingStream(stream) {
+            const videoTracks = stream.getVideoTracks();
+            const audioTracks = stream.getAudioTracks();
+
+            console.log('Export stream:', {
+                videoTracks: videoTracks.length,
+                audioTracks: audioTracks.length,
+                videoTrackStates: videoTracks.map(t => ({ readyState: t.readyState, enabled: t.enabled })),
+                audioTrackStates: audioTracks.map(t => ({ readyState: t.readyState, enabled: t.enabled }))
+            });
+
+            if (videoTracks.length === 0) throw new Error('Canvas video track was not created.');
+            if (videoTracks[0].readyState !== 'live') throw new Error('Canvas video track is not live.');
+            return true;
+        }
+
+        function resetExportUI() {
+            state.isRecording = false;
+            state.isPlaying = false;
+            ui.rec.disabled = false;
+            ui.rec.innerText = 'Record & Export Video';
+            ui.rec.style.backgroundColor = 'var(--danger-color)';
+        }
+
+        ui.rec.addEventListener('click', async () => {
+            if (state.isRecording) await stopRecording();
+            else await startRecording();
+        });
+
+        async function startRecording() {
+            if (!currentModel) {
+                alert('Please load a 3D model before exporting.');
+                return;
+            }
+
+            if (typeof MediaRecorder === 'undefined') {
+                alert('This browser does not support MediaRecorder.');
+                return;
+            }
+
+            try {
+                await setupAudioGraph();
+
+                if (audioContext && audioContext.state === 'suspended') await audioContext.resume();
+
+                const duration = getTimelineDuration();
+                if (duration <= 0) {
+                    alert('Timeline has no duration. Load audio or create timeline blocks first.');
+                    return;
+                }
+
+                stopPlayback(false);
+                seekAudio(0);
+
+                // Ensure one fresh video stream per export.
+                exportCanvasStream = renderer.domElement.captureStream(30);
+                if (!exportCanvasStream) throw new Error('Canvas captureStream() is not available.');
+
+                const videoTracks = exportCanvasStream.getVideoTracks();
+                const audioTracks = mediaStreamDest ? mediaStreamDest.stream.getAudioTracks() : [];
+
+                exportStream = new MediaStream();
+                videoTracks.forEach(track => exportStream.addTrack(track));
+                audioTracks.forEach(track => exportStream.addTrack(track));
+
+                validateRecordingStream(exportStream);
+
+                const format = getSupportedRecordingFormat();
+                const recorderOptions = { videoBitsPerSecond: format.videoBitsPerSecond };
+                if (format.audioBitsPerSecond) recorderOptions.audioBitsPerSecond = format.audioBitsPerSecond;
+                if (format.mimeType) recorderOptions.mimeType = format.mimeType;
+
+                try {
+                    mediaRecorder = new MediaRecorder(exportStream, recorderOptions);
+                } catch (error) {
+                    console.warn('Preferred recorder failed, using fallback:', error);
+                    mediaRecorder = new MediaRecorder(exportStream);
+                }
+
+                recordingChunks = [];
+
+                mediaRecorder.onstart = () => {
+                    console.log('MediaRecorder started:', mediaRecorder.mimeType);
+                };
+
+                mediaRecorder.ondataavailable = event => {
+                    if (event.data && event.data.size > 0) {
+                        recordingChunks.push(event.data);
+                        console.log('Recorder chunk:', event.data.size, 'bytes');
+                    }
+                };
+
+                mediaRecorder.onerror = event => {
+                    console.error('MediaRecorder error:', event);
+                    resetExportUI();
+                    alert('Video recording failed. Check the browser console for details.');
+                };
+
+                mediaRecorder.onstop = () => {
+                    finalizeRecording();
+                };
+
+                // Start recording BEFORE starting audio playback.
+                mediaRecorder.start(250);
+
+                state.isRecording = true;
+                ui.rec.disabled = true;
+                ui.rec.innerText = 'Exporting...';
+                ui.rec.style.backgroundColor = '#6c757d';
+
+                // Give the browser one frame to initialize the capture stream.
+                await new Promise(resolve => requestAnimationFrame(resolve));
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                state.audioTime = 0;
+                state.playStartTimeline = 0;
+                state.playStartWallTime = performance.now();
+                state.isPlaying = true;
+
+                if (audioElement.src) {
+                    audioElement.currentTime = 0;
+                    await audioElement.play();
+                }
+
+                console.log('Export started. Duration:', duration);
+
+                if (exportMonitorTimer) clearInterval(exportMonitorTimer);
+                exportMonitorTimer = setInterval(() => {
+                    if (!state.isRecording) {
+                        clearInterval(exportMonitorTimer);
+                        exportMonitorTimer = null;
+                        return;
+                    }
+
+                    state.audioTime = audioElement.src
+                        ? audioElement.currentTime
+                        : state.audioTime;
+                    updateAudioUI(state.audioTime);
+
+                    if (state.audioTime >= duration - 0.03) {
+                        clearInterval(exportMonitorTimer);
+                        exportMonitorTimer = null;
+                        stopRecording();
+                    }
+                }, 50);
+
+            } catch (error) {
+                console.error('EXPORT START FAILED:', error);
+                resetExportUI();
+                alert('Export failed to start.\n\n' + error.message);
+            }
+        }
+
+        async function stopRecording() {
+            if (!mediaRecorder) {
+                resetExportUI();
+                return;
+            }
+
+            if (exportMonitorTimer) {
+                clearInterval(exportMonitorTimer);
+                exportMonitorTimer = null;
+            }
+
+            state.isRecording = false;
+            state.isPlaying = false;
+
+            if (audioElement.src) {
+                try { audioElement.pause(); } catch (e) {}
+            }
+
+            ui.rec.disabled = true;
+            ui.rec.innerText = 'Finalizing...';
+
+            if (mediaRecorder.state !== 'inactive') {
+                try { mediaRecorder.requestData(); } catch (e) { console.warn('requestData failed:', e); }
+                mediaRecorder.stop();
+            } else {
+                finalizeRecording();
+            }
+        }
+
+        function finalizeRecording() {
+            try {
+                const mimeType = mediaRecorder?.mimeType || 'video/webm';
+                const blob = new Blob(recordingChunks, { type: mimeType });
+
+                console.log('FINAL EXPORT:', {
+                    size: blob.size,
+                    sizeMB: (blob.size / 1024 / 1024).toFixed(2),
+                    mimeType,
+                    chunks: recordingChunks.length
+                });
+
+                if (blob.size < 10000 || recordingChunks.length === 0) {
+                    alert('Export produced an empty or very small file. Keep this tab visible during export and check the browser console for recorder diagnostics.');
+                    return;
+                }
+
+                const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = `avatar_cinematic_${Date.now()}.${extension}`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+
+                ui.info.innerHTML = `<span class="success">Export successful: ${(blob.size / 1024 / 1024).toFixed(2)} MB</span>`;
+                console.log(`Export successful: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
+
+            } catch (error) {
+                console.error('FINALIZE EXPORT ERROR:', error);
+                alert('Could not finalize the exported video.\n\n' + error.message);
+            } finally {
+                if (exportStream) {
+                    exportStream.getTracks().forEach(track => {
+                        try { track.stop(); } catch (e) {}
+                    });
+                }
+
+                if (exportCanvasStream) {
+                    exportCanvasStream.getTracks().forEach(track => {
+                        try { track.stop(); } catch (e) {}
+                    });
+                }
+
+                exportStream = null;
+                exportCanvasStream = null;
+                mediaRecorder = null;
+                recordingChunks = [];
+                resetExportUI();
+            }
         }
 
         ui.theme.addEventListener('click', () => document.body.setAttribute('data-theme', document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
