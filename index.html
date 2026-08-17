@@ -519,96 +519,13 @@
             }
 
             updateAudioUI(target);
-            if (!state.isPlaying) applyTimelinePoseInstant(target);
+            if (!state.isPlaying) {
+                state.timelineClock = target;
+                state.smoothPose = getTargetPoseAtTime(target);
+            }
         }
 
         ui.audioSeek.addEventListener('input', (e) => { seekAudio(parseFloat(e.target.value)); });
-
-        async function startTimelinePlayback() {
-            if (state.isPlaying) return;
-            await setupAudioGraph();
-
-            const duration = getTimelineDuration();
-            if (duration <= 0) return;
-
-            if (state.audioTime >= duration - 0.02) {
-                state.audioTime = 0;
-            }
-
-            if (state.editingBlockId) closePoseEditor();
-
-            // IMPORTANT: The animation/timeline clock is independent from
-            // HTMLMediaElement's coarse timeupdate events. Audio is synced to it.
-            state.playBaseTime = state.audioTime;
-            state.timelineClock = state.playBaseTime;
-            state.playEpoch = performance.now();
-            state.audioSyncLast = 0;
-            state.isPlaying = true;
-            ui.play.innerText = 'Pause Timeline';
-
-            // Apply the first pose immediately before starting audio.
-            applyTimelinePoseInstant(state.timelineClock);
-
-            if (audioElement.src) {
-                try {
-                    audioElement.currentTime = state.timelineClock;
-                    await audioElement.play();
-                } catch (err) {
-                    console.error('Audio playback failed:', err);
-                    state.isPlaying = false;
-                    ui.play.innerText = 'Play Timeline';
-                    return;
-                }
-            }
-        }
-
-        function stopPlayback(resetPosition = false) {
-            state.isPlaying = false;
-            ui.play.innerText = 'Play Timeline';
-
-            if (audioElement.src) {
-                try { audioElement.pause(); } catch (err) {}
-            }
-
-            if (resetPosition) {
-                state.audioTime = 0;
-                state.timelineClock = 0;
-                state.playBaseTime = 0;
-                try { audioElement.currentTime = 0; } catch (e) {}
-                applyTimelinePoseInstant(0);
-            }
-        }
-
-        audioElement.addEventListener('loadedmetadata', () => {
-            state.audioDuration = Number.isFinite(audioElement.duration) ? audioElement.duration : 0;
-            ui.audioSeek.max = Math.max(getTimelineDuration(), 0.01);
-            ui.audioSeek.disabled = false;
-            updateAudioUI(audioElement.currentTime || 0);
-        });
-
-        audioElement.addEventListener('durationchange', () => {
-            ui.audioSeek.max = Math.max(getTimelineDuration(), 0.01);
-            updateAudioUI(audioElement.currentTime || 0);
-        });
-
-        audioElement.addEventListener('timeupdate', () => {
-            if (!state.isPlaying) {
-                state.audioTime = audioElement.currentTime || state.audioTime;
-                updateAudioUI(state.audioTime);
-            }
-        });
-
-        audioElement.addEventListener('ended', () => {
-            if (state.isRecording) return;
-            state.audioTime = getTimelineDuration();
-            updateAudioUI(state.audioTime);
-            stopPlayback(false);
-        });
-
-        ui.play.addEventListener('click', async () => {
-            if (state.isPlaying) stopPlayback(false);
-            else await startTimelinePlayback();
-        });
 
         // --- THREE.JS SCENE ---
         const scene = new THREE.Scene();
@@ -633,7 +550,7 @@
         scene.add(keyLight);
         scene.add(new THREE.DirectionalLight(0xd0e0ff, 1.0)).position.set(-5, 3, 3);
 
-        let currentModel = null, audioContext, analyser, audioBuffer, mediaStreamDest, dataArray;
+        let currentModel = null, audioContext, analyser, mediaStreamDest, dataArray;
 
         function resize() {
             const parent = ui.container.parentElement;
@@ -669,142 +586,228 @@
         }
         ui.centerBtn.addEventListener('click', centerAndFitModel);
 
+        // ============================================================
+        // ROBUST GLB RIG LOADER
+        // Uses explicit semantic matching + hierarchy/side scoring.
+        // ============================================================
         ui.glb.addEventListener('change', e => {
-            const file = e.target.files[0];
+            const file = e.target.files?.[0];
             if (!file) return;
-            ui.info.innerHTML = "Parsing Model & Extracting Skeleton...";
-            
-            const url = window.URL.createObjectURL(file);
-            new GLTFLoader().load(url, gltf => {
-                if (currentModel) modelGroup.remove(currentModel);
-                currentModel = gltf.scene;
-                modelGroup.add(currentModel);
-                
-                state.morphMeshes = []; state.bones = {}; state.initialBones = {};
-                let blendshapeCount = 0;
-                const allBones = [];
 
-                // Capture every bone first.  Do NOT trust a single naming convention.
-                currentModel.traverse(node => {
-                    if (node.isMesh) {
-                        node.castShadow = true;
-                        if (node.morphTargetDictionary) {
-                            state.morphMeshes.push(node);
-                            blendshapeCount += Object.keys(node.morphTargetDictionary).length;
+            ui.info.innerHTML = 'Parsing model and discovering rig...';
+            const url = URL.createObjectURL(file);
+
+            new GLTFLoader().load(
+                url,
+                gltf => {
+                    try {
+                        if (currentModel) modelGroup.remove(currentModel);
+
+                        currentModel = gltf.scene;
+                        modelGroup.add(currentModel);
+
+                        state.morphMeshes = [];
+                        state.bones = {};
+                        state.initialBones = {};
+
+                        const bones = [];
+                        let blendshapeCount = 0;
+
+                        currentModel.traverse(node => {
+                            if (node.isMesh) {
+                                node.castShadow = true;
+                                if (node.morphTargetDictionary) {
+                                    state.morphMeshes.push(node);
+                                    blendshapeCount += Object.keys(node.morphTargetDictionary).length;
+                                }
+                            }
+
+                            if (node.isBone) {
+                                bones.push(node);
+                                state.initialBones[node.uuid] = {
+                                    q: node.quaternion.clone(),
+                                    p: node.position.clone(),
+                                    s: node.scale.clone()
+                                };
+                            }
+                        });
+
+                        function n(name) {
+                            return String(name || '')
+                                .toLowerCase()
+                                .replace(/[^a-z0-9]/g, '');
                         }
-                    }
-                    if (node.isBone) {
-                        allBones.push(node);
-                        state.initialBones[node.uuid] = {
-                            q: node.quaternion.clone(),
-                            p: node.position.clone()
-                        };
-                    }
-                });
 
-                function normBoneName(name) {
-                    return String(name || '')
-                        .toLowerCase()
-                        .replace(/[^a-z0-9]/g, '');
-                }
+                        function sideOf(name) {
+                            const s = String(name || '').toLowerCase();
+                            const compact = n(s);
 
-                function scoreBone(name, role) {
-                    const n = normBoneName(name);
-                    const has = (...terms) => terms.some(t => n.includes(t));
-                    let score = 0;
+                            if (
+                                /(^|[^a-z])(left|l)([^a-z]|$)/.test(s) ||
+                                compact.includes('left') ||
+                                compact.endsWith('l') ||
+                                compact.includes('mixamorigtleft') ||
+                                compact.includes('jbianl')
+                            ) return 'L';
 
-                    if (role === 'hips') {
-                        if (has('hips', 'pelvis', 'root')) score += 100;
-                    }
-                    if (role === 'spine') {
-                        if (has('spine')) score += 40;
-                        if (has('chest', 'upperchest')) score -= 30;
-                        if (has('spine1', 'spine2', 'spine3', 'spine4')) score -= 10;
-                    }
-                    if (role === 'chest') {
-                        if (has('chest', 'upperchest', 'spine2', 'spine3')) score += 80;
-                        if (has('spine')) score += 10;
-                    }
-                    if (role === 'neck' && has('neck')) score += 100;
-                    if (role === 'head' && has('head')) score += 100;
+                            if (
+                                /(^|[^a-z])(right|r)([^a-z]|$)/.test(s) ||
+                                compact.includes('right') ||
+                                compact.endsWith('r') ||
+                                compact.includes('mixamorigright') ||
+                                compact.includes('jbianr')
+                            ) return 'R';
 
-                    const lower = name.toLowerCase();
-                    const left = /(^|[_\-.])l([_\-.]|$)/.test(lower) || /left/.test(lower) || /(^|[^a-z])l($|[^a-z])/.test(lower);
-                    const right = /(^|[_\-.])r([_\-.]|$)/.test(lower) || /right/.test(lower) || /(^|[^a-z])r($|[^a-z])/.test(lower);
-                    const isLeft = role.startsWith('l');
-                    if (isLeft && !left) score -= 1000;
-                    if (!isLeft && role.startsWith('r') && !right) score -= 1000;
-                    if (left && isLeft) score += 100;
-                    if (right && !isLeft && role.startsWith('r')) score += 100;
-
-                    if (role.endsWith('shoulder') && has('shoulder', 'clavicle')) score += 90;
-                    if (role.endsWith('arm') && has('upperarm', 'arm')) score += 80;
-                    if (role.endsWith('fore') && has('forearm', 'lowerarm', 'elbow')) score += 90;
-                    if (role.endsWith('hand') && has('hand', 'wrist')) score += 90;
-                    if (role.endsWith('eye') && has('eye')) score += 90;
-
-                    // Strongly prefer explicit side words and exact semantic names.
-                    if (isLeft && has('left')) score += 30;
-                    if (!isLeft && role.startsWith('r') && has('right')) score += 30;
-                    if (role.endsWith('arm') && has('upperarm')) score += 25;
-                    if (role.endsWith('fore') && has('forearm')) score += 25;
-
-                    return score;
-                }
-
-                function findBestBone(role) {
-                    let best = null;
-                    let bestScore = -Infinity;
-                    for (const bone of allBones) {
-                        const score = scoreBone(bone.name, role);
-                        if (score > bestScore) {
-                            bestScore = score;
-                            best = bone;
+                            return null;
                         }
+
+                        function semanticScore(bone, role) {
+                            const name = n(bone.name);
+                            const side = sideOf(bone.name);
+                            const wantedSide = role.startsWith('l') ? 'L' : role.startsWith('r') ? 'R' : null;
+                            const scores = {
+                                hips: ['hips','pelvis','pelvic','mixamorig','root'],
+                                spine: ['spine','spine1'],
+                                chest: ['chest','upperchest','spine2','spine3'],
+                                neck: ['neck'],
+                                head: ['head'],
+                                shoulder: ['shoulder','clavicle'],
+                                arm: ['upperarm','upper_arm','arm'],
+                                fore: ['forearm','lowerarm','lower_arm','elbow'],
+                                hand: ['hand','wrist'],
+                                eye: ['eye']
+                            };
+
+                            const group =
+                                role.includes('shoulder') ? 'shoulder' :
+                                role.endsWith('arm') ? 'arm' :
+                                role.endsWith('fore') ? 'fore' :
+                                role.endsWith('hand') ? 'hand' :
+                                role.endsWith('eye') ? 'eye' : role;
+
+                            let score = 0;
+                            for (const term of (scores[group] || [])) {
+                                if (name === term) score += 120;
+                                else if (name.includes(term)) score += term.length >= 5 ? 70 : 35;
+                            }
+
+                            if (wantedSide) {
+                                if (side === wantedSide) score += 160;
+                                else if (side && side !== wantedSide) score -= 500;
+                            }
+
+                            // Reject obvious neighboring roles.
+                            if (role.endsWith('arm') && (name.includes('forearm') || name.includes('lowerarm'))) score -= 100;
+                            if (role.endsWith('fore') && name.includes('upperarm')) score -= 100;
+                            if (role.endsWith('hand') && (name.includes('forearm') || name.includes('upperarm'))) score -= 100;
+                            if (role === 'spine' && (name.includes('chest') || name.includes('upperchest'))) score -= 100;
+                            if (role === 'chest' && name === 'spine') score -= 30;
+
+                            return score;
+                        }
+
+                        function nearestAncestorRole(bone, roleName) {
+                            let p = bone.parent;
+                            let hops = 0;
+                            while (p && hops < 8) {
+                                const pn = n(p.name);
+                                if (pn.includes(roleName)) return true;
+                                p = p.parent;
+                                hops++;
+                            }
+                            return false;
+                        }
+
+                        function chooseRole(role, used) {
+                            let best = null;
+                            let bestScore = -Infinity;
+
+                            for (const bone of bones) {
+                                if (used.has(bone.uuid)) continue;
+
+                                let score = semanticScore(bone, role);
+
+                                if (role === 'lShoulder' || role === 'rShoulder') {
+                                    if (nearestAncestorRole(bone, 'shoulder')) score += 20;
+                                }
+                                if (role === 'lFore' || role === 'rFore') {
+                                    if (nearestAncestorRole(bone, 'arm')) score += 10;
+                                }
+
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    best = bone;
+                                }
+                            }
+
+                            return bestScore >= 45 ? best : null;
+                        }
+
+                        const used = new Set();
+                        const roles = [
+                            'hips','spine','chest','neck','head',
+                            'lShoulder','rShoulder','lArm','rArm',
+                            'lFore','rFore','lHand','rHand','lEye','rEye'
+                        ];
+
+                        for (const role of roles) {
+                            const bone = chooseRole(role, used);
+                            if (bone) {
+                                state.bones[role] = bone;
+                                used.add(bone.uuid);
+                            }
+                        }
+
+                        const mapped = Object.entries(state.bones)
+                            .map(([role, bone]) => `${role}: ${bone.name}`)
+                            .join('<br>');
+
+                        const required = ['lArm','rArm','lFore','rFore'];
+                        const missing = required.filter(k => !state.bones[k]);
+
+                        // Reset to true bind/local pose before preview starts.
+                        for (const bone of bones) {
+                            const original = state.initialBones[bone.uuid];
+                            bone.quaternion.copy(original.q);
+                            bone.position.copy(original.p);
+                            bone.scale.copy(original.s);
+                        }
+
+                        currentModel.updateMatrixWorld(true);
+
+                        if (missing.length) {
+                            ui.info.innerHTML =
+                                `<span class="warning">Model loaded, but required animation bones are missing.<br>` +
+                                `Missing: ${missing.join(', ')}<br><small>${mapped || 'No compatible bones found.'}</small></span>`;
+                        } else {
+                            ui.info.innerHTML =
+                                `<span class="success">Rig ready — ${Object.keys(state.bones).length} bones mapped.<br>` +
+                                `<small>${mapped}</small></span>`;
+                        }
+
+                        console.table(
+                            Object.fromEntries(
+                                Object.entries(state.bones).map(([k,b]) => [k, b.name])
+                            )
+                        );
+                        console.log('Total bones:', bones.length);
+                        console.log('Morph targets:', blendshapeCount);
+
+                        ui.centerBtn.disabled = false;
+                        centerAndFitModel();
+                        ui.rec.disabled = false;
+
+                    } finally {
+                        URL.revokeObjectURL(url);
                     }
-                    return bestScore > 20 ? best : null;
+                },
+                undefined,
+                error => {
+                    console.error('GLB load failed:', error);
+                    ui.info.innerHTML = `<span class="error">Could not load GLB: ${error?.message || error}</span>`;
+                    URL.revokeObjectURL(url);
                 }
-
-                const roleMap = { hips:'hips', spine:'spine', chest:'chest', neck:'neck', head:'head', lshoulder:'lShoulder', rshoulder:'rShoulder', larm:'lArm', rarm:'rArm', lfore:'lFore', rfore:'rFore', lhand:'lHand', rhand:'rHand', leye:'lEye', reye:'rEye' };
-
-                const roles = [
-                    'hips','spine','chest','neck','head',
-                    'lshoulder','rshoulder',
-                    'larm','rarm','lfore','rfore',
-                    'lhand','rhand','leye','reye'
-                ];
-
-                for (const role of roles) {
-                    const bone = findBestBone(role);
-                    if (bone) state.bones[roleMap[role]] = bone;
-                }
-
-                // IMPORTANT: every bone keeps its own ORIGINAL local transform.
-                // This makes timeline rotations independent of the model's bind pose.
-                for (const bone of allBones) {
-                    state.initialBones[bone.uuid] = {
-                        q: bone.quaternion.clone(),
-                        p: bone.position.clone()
-                    };
-                }
-
-                const mapped = Object.entries(state.bones)
-                    .filter(([, b]) => !!b)
-                    .map(([role, b]) => `${role}:${b.name}`)
-                    .join('<br>');
-
-                const required = ['lArm','rArm','lFore','rFore'];
-                const missingRequired = required.filter(k => !state.bones[k]);
-
-                if (missingRequired.length) {
-                    ui.info.innerHTML = `<span class="warning">Model loaded, but arm bones were not mapped.<br>Missing: ${missingRequired.join(', ')}<br><small>${mapped || 'No usable arm skeleton found.'}</small></span>`;
-                } else {
-                    ui.info.innerHTML = `<span class="success">Rig Active — ${Object.keys(state.bones).length} animation bones mapped.<br><small>${mapped}</small></span>`;
-                }
-                ui.centerBtn.disabled = false; centerAndFitModel();
-                ui.rec.disabled = false;
-                window.URL.revokeObjectURL(url);
-            });
+            );
         });
 
         ui.audio.addEventListener('change', async e => {
@@ -832,129 +835,357 @@
             }
         });
 
-        // --- MATH ENGINE ---
-        function cleanName(n) { return n.toLowerCase().replace(/[^a-z0-9]/g, ''); }
+        // ============================================================
+        // DETERMINISTIC RIG + TIMELINE ENGINE
+        // ============================================================
+        function cleanName(n) {
+            return String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        }
+
         function setMorphUniversal(mesh, searchNames, value, speed = 0.4) {
-            if (!mesh.morphTargetDictionary) return;
+            if (!mesh.morphTargetDictionary || !mesh.morphTargetInfluences) return;
+
             const keys = Object.keys(mesh.morphTargetDictionary);
+            const target = THREE.MathUtils.clamp(Number(value) || 0, 0, 1);
+
             for (const search of searchNames) {
                 const cleanSearch = cleanName(search);
                 for (const key of keys) {
-                    if (cleanName(key) === cleanSearch || (cleanSearch.length > 2 && cleanName(key).includes(cleanSearch))) {
+                    const ck = cleanName(key);
+                    if (ck === cleanSearch || (cleanSearch.length > 2 && ck.includes(cleanSearch))) {
                         const idx = mesh.morphTargetDictionary[key];
-                        mesh.morphTargetInfluences[idx] = THREE.MathUtils.lerp(mesh.morphTargetInfluences[idx], Math.min(value, 1.0), speed);
-                        break; 
+                        mesh.morphTargetInfluences[idx] = THREE.MathUtils.lerp(
+                            mesh.morphTargetInfluences[idx],
+                            target,
+                            speed
+                        );
+                        break;
                     }
                 }
             }
         }
 
-        function setBoneAbsolute(bone, x, y, z) {
+        // Apply local rotation relative to the model's actual bind/local rotation.
+        function applyBoneOffset(role, x = 0, y = 0, z = 0) {
+            const bone = state.bones[role];
             if (!bone) return;
+
             const original = state.initialBones[bone.uuid];
             if (!original) return;
 
-            const offsetQ = new THREE.Quaternion().setFromEuler(
+            const qOffset = new THREE.Quaternion().setFromEuler(
                 new THREE.Euler(x, y, z, 'XYZ')
             );
 
-            bone.quaternion.copy(original.q).multiply(offsetQ);
-            bone.updateMatrix();
+            bone.quaternion.copy(original.q).multiply(qOffset);
         }
 
-        function applyAdditiveProcedural(bone, x, y, z) {
+        function applyBonePose(pose) {
+            // IMPORTANT: always start from original bind/local rotations.
+            // This prevents previous frames from accumulating into the next frame.
+            applyBoneOffset('lShoulder', pose.lSP, pose.lSY, pose.lSR);
+            applyBoneOffset('lArm',      pose.lAP, pose.lAY, pose.lAR);
+            applyBoneOffset('lFore',     pose.lFP, pose.lFY, 0);
+            applyBoneOffset('lHand',     pose.lHP, 0,        pose.lHR);
+
+            applyBoneOffset('rShoulder', pose.rSP, pose.rSY, pose.rSR);
+            applyBoneOffset('rArm',      pose.rAP, pose.rAY, -pose.rAR);
+            applyBoneOffset('rFore',     pose.rFP, pose.rFY, 0);
+            applyBoneOffset('rHand',     pose.rHP, 0,        -pose.rHR);
+        }
+
+        function applyProceduralOffset(role, x = 0, y = 0, z = 0) {
+            const bone = state.bones[role];
             if (!bone) return;
-            const offsetQ = new THREE.Quaternion().setFromEuler(
+
+            const q = new THREE.Quaternion().setFromEuler(
                 new THREE.Euler(x, y, z, 'XYZ')
             );
-            bone.quaternion.multiply(offsetQ);
-            bone.updateMatrix();
+            bone.quaternion.multiply(q);
         }
 
-        // ============================================================
-        // TIMELINE RESOLVER
-        // ============================================================
         function getTargetPoseAtTime(t) {
             if (state.editingBlockId && !state.isPlaying) {
-                const editingBlock = state.blocks.find(x => x.id === state.editingBlockId);
-                if (editingBlock) return { ...BaseRest, ...editingBlock.customPose };
+                const editing = state.blocks.find(b => b.id === state.editingBlockId);
+                if (editing) return { ...BaseRest, ...editing.customPose };
             }
 
-            let activeBlock = null;
+            // Sort once through renderTimeline; still iterate deterministically.
             for (const block of state.blocks) {
                 const start = Number(block.start);
                 const end = Number(block.end);
                 if (Number.isFinite(start) && Number.isFinite(end) && t >= start && t < end) {
-                    activeBlock = block;
-                    break;
+                    return { ...BaseRest, ...block.customPose };
                 }
             }
 
-            return activeBlock
-                ? { ...BaseRest, ...activeBlock.customPose }
-                : { ...BaseRest };
+            return { ...BaseRest };
         }
 
-        const clock = new THREE.Clock();
+        function setTimelineTime(time, exact = false) {
+            const duration = getTimelineDuration();
+            const t = THREE.MathUtils.clamp(Number(time) || 0, 0, Math.max(duration, 0));
+            state.audioTime = t;
+            state.timelineClock = t;
 
-        function animate() {
+            const target = getTargetPoseAtTime(t);
+
+            if (exact) {
+                state.smoothPose = { ...target };
+            } else {
+                const dt = Math.min(Math.max(clock.getDelta(), 0), 0.05);
+                const alpha = 1 - Math.exp(-16 * dt);
+                for (const key of Object.keys(BaseRest)) {
+                    const tv = Number(target[key] ?? 0);
+                    state.smoothPose[key] = THREE.MathUtils.lerp(
+                        Number(state.smoothPose[key] ?? 0),
+                        tv,
+                        alpha
+                    );
+                }
+            }
+
+            applyBonePose(state.smoothPose);
+        }
+
+        function applyCurrentFrame(delta) {
+            if (!currentModel) return;
+
+            const t = state.isPlaying ? state.timelineClock : state.audioTime;
+            const target = getTargetPoseAtTime(t);
+
+            // No hidden audio dependency. Timeline directly controls pose.
+            if (state.isPlaying) {
+                // Smooth block changes, but never lose the target pose.
+                const alpha = 1 - Math.exp(-18 * Math.min(delta, 0.05));
+                for (const key of Object.keys(BaseRest)) {
+                    const tv = Number(target[key] ?? 0);
+                    state.smoothPose[key] = THREE.MathUtils.lerp(
+                        Number(state.smoothPose[key] ?? 0),
+                        tv,
+                        alpha
+                    );
+                }
+            } else {
+                state.smoothPose = { ...target };
+            }
+
+            // BASE TIMELINE POSE
+            applyBonePose(state.smoothPose);
+
+            // PROCEDURAL LAYER
+            const swayAmp = parseFloat(ui.animSway.value) || 1;
+            const lifeTime = t;
+
+            const breath = Math.sin(lifeTime * 1.8) * 0.015 * swayAmp;
+            const swayX = Math.sin(lifeTime * 0.4) * 0.03 * swayAmp;
+            const talk = state.speechEnergy;
+
+            if (state.bones.hips) {
+                const shift = Math.sin(lifeTime * 0.4) * 0.015 * swayAmp;
+                applyBoneOffset('hips', 0, 0, -shift * 2);
+                applyProceduralOffset('hips', 0, 0, 0);
+            }
+
+            applyProceduralOffset('spine', breath, 0, swayX);
+            applyProceduralOffset('chest', breath * 1.5, 0, swayX * 0.5);
+
+            const nod = Math.sin(lifeTime * 3) * 0.03 * talk + breath * 0.5;
+            applyProceduralOffset('neck', nod, 0, -swayX);
+            applyProceduralOffset('head', nod, 0, 0);
+
+            // Eyes: use a small deterministic movement, not random per frame.
+            const eyeX = Math.sin(lifeTime * 0.7) * 0.08;
+            const eyeY = Math.sin(lifeTime * 0.47) * 0.05;
+            applyBoneOffset('lEye', eyeY, eyeX, 0);
+            applyBoneOffset('rEye', eyeY, eyeX, 0);
+
+            // Mouth / facial animation.
+            const mouthMax = parseFloat(ui.mouthAmp.value) || 0.8;
+            for (const mesh of state.morphMeshes) {
+                const jaw = state.isPlaying ? state.speechEnergy * 2.5 * mouthMax : 0;
+                const vowel = state.isPlaying ? state.speechEnergy * mouthMax : 0;
+
+                setMorphUniversal(mesh,
+                    ['jawopen','mouthopen','visemeaa','vrcvaa','fclmtha','a','ah'],
+                    jaw, 0.35
+                );
+
+                setMorphUniversal(mesh,
+                    ['mouthfunnel','visemeu','visemeo','vrcvoh','fclmtho','o','u','oo','pucker'],
+                    vowel, 0.3
+                );
+
+                setMorphUniversal(mesh,
+                    ['mouthsmileleft','mouthsmileright','smile','fclmthe','e','ee'],
+                    state.isPlaying ? 0.08 + state.speechEnergy * 0.25 : 0.05,
+                    0.2
+                );
+            }
+
+            // Force the skeleton and skinned meshes to consume the new bone transforms.
+            currentModel.updateMatrixWorld(true);
+        }
+
+        // ============================================================
+        // AUDIO / TIMELINE PLAYBACK
+        // ============================================================
+        const timelineClock = {
+            running: false,
+            base: 0,
+            epoch: 0,
+            duration: 0
+        };
+
+        async function startTimelinePlayback() {
+            if (state.isPlaying) return;
+
+            const duration = getTimelineDuration();
+            if (duration <= 0) {
+                alert('Add a timeline block or load an audio file first.');
+                return;
+            }
+
+            await setupAudioGraph();
+
+            if (state.audioTime >= duration - 0.02) {
+                state.audioTime = 0;
+            }
+
+            if (state.editingBlockId) closePoseEditor();
+
+            timelineClock.base = state.audioTime;
+            timelineClock.epoch = performance.now();
+            timelineClock.duration = duration;
+            timelineClock.running = true;
+
+            state.playBaseTime = timelineClock.base;
+            state.playEpoch = timelineClock.epoch;
+            state.isPlaying = true;
+            state.isRecording = false;
+
+            ui.play.innerText = 'Pause Timeline';
+            setTimelineTime(timelineClock.base, true);
+
+            if (audioElement.src) {
+                try {
+                    audioElement.currentTime = timelineClock.base;
+                    await audioElement.play();
+                } catch (err) {
+                    console.warn('Audio play blocked:', err);
+                    // The animation still works even if audio playback is blocked.
+                }
+            }
+        }
+
+        function stopPlayback(reset = false) {
+            state.isPlaying = false;
+            timelineClock.running = false;
+            ui.play.innerText = 'Play Timeline';
+
+            try { audioElement.pause(); } catch (e) {}
+
+            if (reset) {
+                state.audioTime = 0;
+                state.timelineClock = 0;
+                state.smoothPose = { ...BaseRest };
+                try { audioElement.currentTime = 0; } catch (e) {}
+            }
+        }
+
+        // ============================================================
+        // MAIN RENDER LOOP
+        // ============================================================
+        const clock = new THREE.Clock();
+        let lastFrameNow = performance.now();
+        let audioCorrectionAt = 0;
+
+        function animate(now = performance.now()) {
             requestAnimationFrame(animate);
-            const delta = clock.getDelta();
+
+            const delta = Math.min((now - lastFrameNow) / 1000, 0.05);
+            lastFrameNow = now;
+
             state.time += delta;
 
             if (currentModel) {
                 modelGroup.scale.setScalar(parseFloat(ui.scale.value) || 1);
-                modelGroup.position.set(parseFloat(ui.posX.value)||0, parseFloat(ui.posY.value)||0, parseFloat(ui.posZ.value)||0);
+                modelGroup.position.set(
+                    parseFloat(ui.posX.value) || 0,
+                    parseFloat(ui.posY.value) || 0,
+                    parseFloat(ui.posZ.value) || 0
+                );
             }
 
-            // ========================================================
-            // DETERMINISTIC MASTER TIMELINE CLOCK
-            // ========================================================
             if (state.isPlaying) {
-                const elapsed = (performance.now() - state.playEpoch) / 1000;
+                const elapsed = Math.max(0, (now - timelineClock.epoch) / 1000);
+                const nextTime = timelineClock.base + elapsed;
                 const duration = getTimelineDuration();
+                state.timelineClock = Math.min(nextTime, duration);
+                state.audioTime = state.timelineClock;
 
-                state.timelineClock = state.playBaseTime + elapsed;
-                state.audioTime = Math.min(state.timelineClock, duration);
-
-                // Keep real audio aligned to our animation clock.
-                // Do this infrequently so seeking the media element does not
-                // destabilize playback.
-                if (audioElement.src && audioElement.readyState >= 2) {
-                    if (Math.abs(audioElement.currentTime - state.audioTime) > 0.12) {
-                        try { audioElement.currentTime = state.audioTime; } catch (e) {}
+                // Do NOT seek audio every frame. Only use a very occasional
+                // soft correction if it drifts noticeably.
+                if (
+                    audioElement.src &&
+                    audioElement.readyState >= 2 &&
+                    audioElement.paused === false &&
+                    now - audioCorrectionAt > 750
+                ) {
+                    audioCorrectionAt = now;
+                    const drift = audioElement.currentTime - state.audioTime;
+                    if (Math.abs(drift) > 0.20) {
+                        timelineClock.epoch = now - (audioElement.currentTime - timelineClock.base) * 1000;
+                        state.timelineClock = audioElement.currentTime;
+                        state.audioTime = audioElement.currentTime;
                     }
                 }
 
-                updateAudioUI(state.audioTime);
+                if (duration > 0 && state.timelineClock >= duration) {
+                    state.timelineClock = duration;
+                    state.audioTime = duration;
+                    applyCurrentFrame(delta);
 
-                if (duration > 0 && state.audioTime >= duration) {
-                    if (state.isRecording) {
-                        state.audioTime = duration;
-                    } else {
+                    if (!state.isRecording) {
                         stopPlayback(false);
                     }
                 }
             }
 
-            let vocalEnergy = 0, highEnergy = 0;
-            if (state.isPlaying && analyser && state.audioTime < state.audioDuration) {
+            // Analyser is independent of the timeline pose engine.
+            let vocalEnergy = 0;
+            if (
+                state.isPlaying &&
+                analyser &&
+                dataArray &&
+                audioElement.readyState >= 2
+            ) {
                 analyser.getByteFrequencyData(dataArray);
-                for (let i = 2; i < 20; i++) vocalEnergy += dataArray[i];
+                for (let i = 2; i < Math.min(20, dataArray.length); i++) {
+                    vocalEnergy += dataArray[i];
+                }
                 vocalEnergy = (vocalEnergy / 18) / 255;
-                for (let i = 20; i < 60; i++) highEnergy += dataArray[i];
-                highEnergy = (highEnergy / 40) / 255;
-                state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, vocalEnergy, 0.15);
+                state.speechEnergy = THREE.MathUtils.lerp(
+                    state.speechEnergy,
+                    THREE.MathUtils.clamp(vocalEnergy, 0, 1),
+                    0.18
+                );
             } else {
-                state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, 0, 0.1);
+                state.speechEnergy = THREE.MathUtils.lerp(
+                    state.speechEnergy,
+                    0,
+                    0.10
+                );
             }
 
-            // --- 1. DETERMINE TARGET POSE & LERP ---
-            const targetPose = getTargetPoseAtTime(state.audioTime);
+            if (currentModel) {
+                applyCurrentFrame(delta);
+            }
 
-            // Debug/diagnostic state: this makes it obvious whether playback
-            // is actually inside a timeline block.
-            if (state.isPlaying && currentModel && ui.info) {
+            updateAudioUI(state.audioTime);
+
+            // Clear, frame-accurate playback diagnostic.
+            if (state.isPlaying && ui.info) {
                 const active = state.blocks.find(b =>
                     state.audioTime >= Number(b.start) &&
                     state.audioTime < Number(b.end)
@@ -964,96 +1195,20 @@
                     : `PLAYING REST @ ${state.audioTime.toFixed(2)}s`;
             }
 
-            const poseSmoothing = state.isPlaying ? 12.0 : 24.0;
-            const poseAlpha = Math.min(1, delta * poseSmoothing);
-
-            for (let key in state.smoothPose) {
-                const tgt = targetPose[key] !== undefined && Number.isFinite(Number(targetPose[key]))
-                    ? Number(targetPose[key])
-                    : 0;
-                state.smoothPose[key] = THREE.MathUtils.lerp(state.smoothPose[key], tgt, poseAlpha);
-            }
-
-            if (currentModel) {
-                const p = state.smoothPose;
-                // Apply Smoothed Base Poses
-                setBoneAbsolute(state.bones.lShoulder, p.lSP, p.lSY, p.lSR);
-                setBoneAbsolute(state.bones.lArm, p.lAP, p.lAY, p.lAR);
-                setBoneAbsolute(state.bones.lFore, p.lFP, p.lFY, 0);
-                setBoneAbsolute(state.bones.lHand, p.lHP, 0, p.lHR);
-
-                setBoneAbsolute(state.bones.rShoulder, p.rSP, p.rSY, p.rSR);
-                setBoneAbsolute(state.bones.rArm, p.rAP, p.rAY, -p.rAR); // Mirrored visually
-                setBoneAbsolute(state.bones.rFore, p.rFP, p.rFY, 0);
-                setBoneAbsolute(state.bones.rHand, p.rHP, 0, -p.rHR);
-
-                // --- 2. LAYER PROCEDURAL LIFE ON TOP ---
-                const t = state.isPlaying ? state.audioTime : state.time;
-                const swayAmp = parseFloat(ui.animSway.value) || 1.0;
-                const talk = state.speechEnergy;
-
-                // Eyes & Blinking
-                state.blinkTimer += delta;
-                if (state.blinkTimer > state.nextBlinkTime) {
-                    const bp = state.blinkTimer - state.nextBlinkTime;
-                    if (bp < 0.05) state.isBlinkingNow = bp / 0.05; 
-                    else if (bp < 0.15) state.isBlinkingNow = 1.0 - ((bp - 0.05) / 0.10); 
-                    else { state.isBlinkingNow = 0; state.blinkTimer = 0; state.nextBlinkTime = Math.random() * 4.0 + 2.0; }
-                }
-
-                if (t > state.nextSaccadeTime) {
-                    state.eyeTarget.x = (Math.random() - 0.5) * 0.4;
-                    state.eyeTarget.y = (Math.random() - 0.5) * 0.2;
-                    state.nextSaccadeTime = t + Math.random() * 2.5 + 0.5;
-                }
-                state.currentEyePos.lerp(state.eyeTarget, 0.1);
-
-                setBoneAbsolute(state.bones.lEye, 0,0,0); applyAdditiveProcedural(state.bones.lEye, state.currentEyePos.y, state.currentEyePos.x, 0);
-                setBoneAbsolute(state.bones.rEye, 0,0,0); applyAdditiveProcedural(state.bones.rEye, state.currentEyePos.y, state.currentEyePos.x, 0);
-
-                // Core Body Sway
-                if (state.bones.hips) {
-                    const shiftX = Math.sin(t * 0.4) * 0.015 * swayAmp;
-                    setBoneAbsolute(state.bones.hips, 0,0,0);
-                    applyAdditiveProcedural(state.bones.hips, 0, 0, -shiftX * 2);
-                }
-
-                const breath = Math.sin(t * 1.8) * 0.015 * swayAmp;
-                const swayX = Math.sin(t * 0.4) * 0.03 * swayAmp;
-                setBoneAbsolute(state.bones.spine, 0,0,0); applyAdditiveProcedural(state.bones.spine, breath, 0, swayX);
-                setBoneAbsolute(state.bones.chest, 0,0,0); applyAdditiveProcedural(state.bones.chest, breath * 1.5, 0, swayX * 0.5);
-
-                const nod = ((Math.sin(t * 3) * 0.03 * talk) + (breath * 0.5));
-                setBoneAbsolute(state.bones.neck, 0,0,0); applyAdditiveProcedural(state.bones.neck, nod + state.currentEyePos.y * 0.2, state.currentEyePos.x * 0.3, -swayX);
-                setBoneAbsolute(state.bones.head, 0,0,0); applyAdditiveProcedural(state.bones.head, nod + state.currentEyePos.y * 0.3, state.currentEyePos.x * 0.4, 0);
-            }
-
-            // --- 3. LIP SYNC ---
-            const mouthMax = parseFloat(ui.mouthAmp.value) || 0.8;
-            state.morphMeshes.forEach(mesh => {
-                if (state.isPlaying) {
-                    const jaw = vocalEnergy * 2.5 * mouthMax; 
-                    setMorphUniversal(mesh, ['jawopen', 'mouthopen', 'visemeaa', 'vrcvaa', 'fclmtha', 'a', 'ah'], jaw, 0.4);
-                    setMorphUniversal(mesh, ['mouthfunnel', 'visemeu', 'visemeo', 'vrcvoh', 'fclmtho', 'o', 'u', 'oo', 'pucker'], highEnergy * mouthMax, 0.3);
-                    setMorphUniversal(mesh, ['mouthsmileleft', 'mouthsmileright', 'smile', 'fclmthe', 'e', 'ee'], 0.2 + (highEnergy * 0.4), 0.2);
-                    setMorphUniversal(mesh, ['browinnerup', 'browouterup', 'browsup', 'surprised'], talk * 0.8, 0.2);
-                } else {
-                    setMorphUniversal(mesh, ['jawopen', 'mouthopen', 'visemeaa', 'vrcvaa', 'fclmtha', 'a', 'ah', 'mouthfunnel', 'visemeu', 'visemeo', 'vrcvoh', 'fclmtho', 'o', 'u', 'oo', 'pucker'], 0, 0.2);
-                    setMorphUniversal(mesh, ['mouthsmileleft', 'mouthsmileright', 'smile', 'fclmthe', 'e', 'ee'], 0.05, 0.1);
-                    setMorphUniversal(mesh, ['browinnerup', 'browouterup', 'browsup', 'surprised'], 0, 0.1);
-                }
-                setMorphUniversal(mesh, ['eyeblinkleft', 'blinkleft', 'eyecloseleft'], state.isBlinkingNow, 0.8); 
-                setMorphUniversal(mesh, ['eyeblinkright', 'blinkright', 'eyecloseright'], state.isBlinkingNow, 0.8); 
-                setMorphUniversal(mesh, ['blink', 'fcleyeclose', 'eyesclosed'], state.isBlinkingNow, 0.8); 
-            });
-
-            if (currentModel) {
-                currentModel.updateMatrixWorld(true);
-            }
             controls.update();
             renderer.render(scene, camera);
+
+            // Export completion is handled from the same render loop, so the
+            // last rendered frame is guaranteed to be included in the stream.
+            if (state.isRecording && state.isPlaying) {
+                const duration = getTimelineDuration();
+                if (duration > 0 && state.audioTime >= duration) {
+                    stopRecording();
+                }
+            }
         }
-        animate();
+
+        requestAnimationFrame(animate);
 
         // ============================================================
         // ROBUST VIDEO EXPORT ENGINE
@@ -1196,35 +1351,25 @@
                 await new Promise(resolve => setTimeout(resolve, 100));
 
                 state.audioTime = 0;
-                state.playBaseTime = 0;
                 state.timelineClock = 0;
-                state.playEpoch = performance.now();
+                timelineClock.base = 0;
+                timelineClock.epoch = performance.now();
+                timelineClock.duration = duration;
+                timelineClock.running = true;
+                state.playBaseTime = 0;
+                state.playEpoch = timelineClock.epoch;
                 state.isPlaying = true;
-                applyTimelinePoseInstant(0);
+                applyCurrentFrame(0.016);
 
                 if (audioElement.src) {
                     audioElement.currentTime = 0;
-                    await audioElement.play();
+                    try { await audioElement.play(); } catch (e) { console.warn('Export audio play blocked:', e); }
                 }
 
                 console.log('Export started. Duration:', duration);
 
-                if (exportMonitorTimer) clearInterval(exportMonitorTimer);
-                exportMonitorTimer = setInterval(() => {
-                    if (!state.isRecording) {
-                        clearInterval(exportMonitorTimer);
-                        exportMonitorTimer = null;
-                        return;
-                    }
-
-                    updateAudioUI(state.audioTime);
-
-                    if (state.audioTime >= duration - 0.03) {
-                        clearInterval(exportMonitorTimer);
-                        exportMonitorTimer = null;
-                        stopRecording();
-                    }
-                }, 50);
+                // Export completion is driven by the SAME master timeline clock
+                // used by the preview animation. No second timer is needed.
 
             } catch (error) {
                 console.error('EXPORT START FAILED:', error);
