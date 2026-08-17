@@ -664,7 +664,9 @@
                 
                 state.morphMeshes = []; state.bones = {}; state.initialBones = {};
                 let blendshapeCount = 0;
-                
+                const allBones = [];
+
+                // Capture every bone first.  Do NOT trust a single naming convention.
                 currentModel.traverse(node => {
                     if (node.isMesh) {
                         node.castShadow = true;
@@ -674,28 +676,110 @@
                         }
                     }
                     if (node.isBone) {
-                        const n = node.name.toLowerCase();
-                        if (n.includes('hips') || n.includes('pelvis')) state.bones.hips = node;
-                        else if (n.includes('spine2') || n.includes('chest')) state.bones.chest = node;
-                        else if (n.includes('spine') && !n.includes('1') && !n.includes('2')) state.bones.spine = node;
-                        else if (n.includes('neck')) state.bones.neck = node;
-                        else if (n.includes('head') && !n.includes('top')) state.bones.head = node;
-                        else if (n.includes('leftshoulder') || n.includes('shoulder_l') || n.includes('clavicle_l')) state.bones.lShoulder = node;
-                        else if (n.includes('rightshoulder') || n.includes('shoulder_r') || n.includes('clavicle_r')) state.bones.rShoulder = node;
-                        else if (n.includes('leftarm') || n.includes('arm_l') || n.includes('upperarm_l')) state.bones.lArm = node;
-                        else if (n.includes('rightarm') || n.includes('arm_r') || n.includes('upperarm_r')) state.bones.rArm = node;
-                        else if (n.includes('leftforearm') || n.includes('forearm_l') || n.includes('elbow_l')) state.bones.lFore = node;
-                        else if (n.includes('rightforearm') || n.includes('forearm_r') || n.includes('elbow_r')) state.bones.rFore = node;
-                        else if (n.includes('lefthand') || n.includes('hand_l') || n.includes('wrist_l')) state.bones.lHand = node;
-                        else if (n.includes('righthand') || n.includes('hand_r') || n.includes('wrist_r')) state.bones.rHand = node;
-                        else if (n.includes('lefteye') || n.includes('eye_l')) state.bones.lEye = node;
-                        else if (n.includes('righteye') || n.includes('eye_r')) state.bones.rEye = node;
-
-                        state.initialBones[node.name] = { q: node.quaternion.clone(), p: node.position.clone() };
+                        allBones.push(node);
+                        state.initialBones[node.uuid] = {
+                            q: node.quaternion.clone(),
+                            p: node.position.clone()
+                        };
                     }
                 });
 
-                ui.info.innerHTML = `<span class="success">Rig Active! Model Ready.</span>`;
+                function normBoneName(name) {
+                    return String(name || '')
+                        .toLowerCase()
+                        .replace(/[^a-z0-9]/g, '');
+                }
+
+                function scoreBone(name, role) {
+                    const n = normBoneName(name);
+                    const has = (...terms) => terms.some(t => n.includes(t));
+                    let score = 0;
+
+                    if (role === 'hips') {
+                        if (has('hips', 'pelvis', 'root')) score += 100;
+                    }
+                    if (role === 'spine') {
+                        if (has('spine')) score += 40;
+                        if (has('chest', 'upperchest')) score -= 30;
+                        if (has('spine1', 'spine2', 'spine3', 'spine4')) score -= 10;
+                    }
+                    if (role === 'chest') {
+                        if (has('chest', 'upperchest', 'spine2', 'spine3')) score += 80;
+                        if (has('spine')) score += 10;
+                    }
+                    if (role === 'neck' && has('neck')) score += 100;
+                    if (role === 'head' && has('head')) score += 100;
+
+                    const left = has('left', 'l') || /(^|[^a-z])l($|[^a-z])/.test(name.toLowerCase());
+                    const right = has('right', 'r') || /(^|[^a-z])r($|[^a-z])/.test(name.toLowerCase());
+                    const isLeft = role.startsWith('l');
+                    if (isLeft && !left) score -= 1000;
+                    if (!isLeft && role.startsWith('r') && !right) score -= 1000;
+
+                    if (role.endsWith('shoulder') && has('shoulder', 'clavicle')) score += 90;
+                    if (role.endsWith('arm') && has('upperarm', 'arm')) score += 80;
+                    if (role.endsWith('fore') && has('forearm', 'lowerarm', 'elbow')) score += 90;
+                    if (role.endsWith('hand') && has('hand', 'wrist')) score += 90;
+                    if (role.endsWith('eye') && has('eye')) score += 90;
+
+                    // Strongly prefer explicit side words and exact semantic names.
+                    if (isLeft && has('left')) score += 30;
+                    if (!isLeft && role.startsWith('r') && has('right')) score += 30;
+                    if (role.endsWith('arm') && has('upperarm')) score += 25;
+                    if (role.endsWith('fore') && has('forearm')) score += 25;
+
+                    return score;
+                }
+
+                function findBestBone(role) {
+                    let best = null;
+                    let bestScore = -Infinity;
+                    for (const bone of allBones) {
+                        const score = scoreBone(bone.name, role);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            best = bone;
+                        }
+                    }
+                    return bestScore > 20 ? best : null;
+                }
+
+                const roleMap = { hips:'hips', spine:'spine', chest:'chest', neck:'neck', head:'head', lshoulder:'lShoulder', rshoulder:'rShoulder', larm:'lArm', rarm:'rArm', lfore:'lFore', rfore:'rFore', lhand:'lHand', rhand:'rHand', leye:'lEye', reye:'rEye' };
+
+                const roles = [
+                    'hips','spine','chest','neck','head',
+                    'lshoulder','rshoulder',
+                    'larm','rarm','lfore','rfore',
+                    'lhand','rhand','leye','reye'
+                ];
+
+                for (const role of roles) {
+                    const bone = findBestBone(role);
+                    if (bone) state.bones[roleMap[role]] = bone;
+                }
+
+                // IMPORTANT: every bone keeps its own ORIGINAL local transform.
+                // This makes timeline rotations independent of the model's bind pose.
+                for (const bone of allBones) {
+                    state.initialBones[bone.uuid] = {
+                        q: bone.quaternion.clone(),
+                        p: bone.position.clone()
+                    };
+                }
+
+                const mapped = Object.entries(state.bones)
+                    .filter(([, b]) => !!b)
+                    .map(([role, b]) => `${role}:${b.name}`)
+                    .join('<br>');
+
+                const required = ['lArm','rArm','lFore','rFore'];
+                const missingRequired = required.filter(k => !state.bones[k]);
+
+                if (missingRequired.length) {
+                    ui.info.innerHTML = `<span class="warning">Model loaded, but arm bones were not mapped.<br>Missing: ${missingRequired.join(', ')}<br><small>${mapped || 'No usable arm skeleton found.'}</small></span>`;
+                } else {
+                    ui.info.innerHTML = `<span class="success">Rig Active — ${Object.keys(state.bones).length} animation bones mapped.<br><small>${mapped}</small></span>`;
+                }
                 ui.centerBtn.disabled = false; centerAndFitModel();
                 ui.rec.disabled = false;
                 window.URL.revokeObjectURL(url);
@@ -745,15 +829,25 @@
         }
 
         function setBoneAbsolute(bone, x, y, z) {
-            if (!bone || !state.initialBones[bone.name]) return;
-            const offsetQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z));
-            bone.quaternion.copy(state.initialBones[bone.name].q).multiply(offsetQ);
+            if (!bone) return;
+            const original = state.initialBones[bone.uuid];
+            if (!original) return;
+
+            const offsetQ = new THREE.Quaternion().setFromEuler(
+                new THREE.Euler(x, y, z, 'XYZ')
+            );
+
+            bone.quaternion.copy(original.q).multiply(offsetQ);
+            bone.updateMatrix();
         }
 
         function applyAdditiveProcedural(bone, x, y, z) {
             if (!bone) return;
-            const offsetQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z));
-            bone.quaternion.multiply(offsetQ); 
+            const offsetQ = new THREE.Quaternion().setFromEuler(
+                new THREE.Euler(x, y, z, 'XYZ')
+            );
+            bone.quaternion.multiply(offsetQ);
+            bone.updateMatrix();
         }
 
         // ============================================================
@@ -853,7 +947,7 @@
                 setBoneAbsolute(state.bones.rHand, p.rHP, 0, -p.rHR);
 
                 // --- 2. LAYER PROCEDURAL LIFE ON TOP ---
-                const t = state.time;
+                const t = state.isPlaying ? state.audioTime : state.time;
                 const swayAmp = parseFloat(ui.animSway.value) || 1.0;
                 const talk = state.speechEnergy;
 
@@ -912,6 +1006,7 @@
                 setMorphUniversal(mesh, ['blink', 'fcleyeclose', 'eyesclosed'], state.isBlinkingNow, 0.8); 
             });
 
+            if (currentModel) currentModel.updateMatrixWorld(true);
             controls.update(); renderer.render(scene, camera);
         }
         animate();
