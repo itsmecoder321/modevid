@@ -294,6 +294,7 @@
             isPlaying: false, isRecording: false, resolution: { w: 1920, h: 1080 },
             morphMeshes: [], bones: {}, initialBones: {},
             time: 0, audioTime: 0, audioDuration: 10.0, speechEnergy: 0,
+            timelineClock: 0, playBaseTime: 0, playEpoch: 0, audioSyncLast: 0,
             playStartWallTime: 0, playStartTimeline: 0,
             eyeTarget: new THREE.Vector2(0, 0), currentEyePos: new THREE.Vector2(0, 0), nextSaccadeTime: 0,
             blinkTimer: 0, nextBlinkTime: 2.0, isBlinkingNow: 0,
@@ -528,25 +529,35 @@
             await setupAudioGraph();
 
             const duration = getTimelineDuration();
+            if (duration <= 0) return;
+
             if (state.audioTime >= duration - 0.02) {
-                seekAudio(0);
+                state.audioTime = 0;
             }
 
             if (state.editingBlockId) closePoseEditor();
 
-            state.playStartTimeline = state.audioTime;
-            state.playStartWallTime = performance.now();
+            // IMPORTANT: The animation/timeline clock is independent from
+            // HTMLMediaElement's coarse timeupdate events. Audio is synced to it.
+            state.playBaseTime = state.audioTime;
+            state.timelineClock = state.playBaseTime;
+            state.playEpoch = performance.now();
+            state.audioSyncLast = 0;
             state.isPlaying = true;
             ui.play.innerText = 'Pause Timeline';
 
+            // Apply the first pose immediately before starting audio.
+            applyTimelinePoseInstant(state.timelineClock);
+
             if (audioElement.src) {
                 try {
+                    audioElement.currentTime = state.timelineClock;
                     await audioElement.play();
                 } catch (err) {
                     console.error('Audio playback failed:', err);
                     state.isPlaying = false;
                     ui.play.innerText = 'Play Timeline';
-                    alert('Audio playback could not start. Click Play again and make sure the browser allows audio playback.');
+                    return;
                 }
             }
         }
@@ -559,7 +570,13 @@
                 try { audioElement.pause(); } catch (err) {}
             }
 
-            if (resetPosition) seekAudio(0);
+            if (resetPosition) {
+                state.audioTime = 0;
+                state.timelineClock = 0;
+                state.playBaseTime = 0;
+                try { audioElement.currentTime = 0; } catch (e) {}
+                applyTimelinePoseInstant(0);
+            }
         }
 
         audioElement.addEventListener('loadedmetadata', () => {
@@ -575,9 +592,10 @@
         });
 
         audioElement.addEventListener('timeupdate', () => {
-            if (!state.isPlaying) return;
-            state.audioTime = audioElement.currentTime;
-            updateAudioUI(state.audioTime);
+            if (!state.isPlaying) {
+                state.audioTime = audioElement.currentTime || state.audioTime;
+                updateAudioUI(state.audioTime);
+            }
         });
 
         audioElement.addEventListener('ended', () => {
@@ -710,11 +728,14 @@
                     if (role === 'neck' && has('neck')) score += 100;
                     if (role === 'head' && has('head')) score += 100;
 
-                    const left = has('left', 'l') || /(^|[^a-z])l($|[^a-z])/.test(name.toLowerCase());
-                    const right = has('right', 'r') || /(^|[^a-z])r($|[^a-z])/.test(name.toLowerCase());
+                    const lower = name.toLowerCase();
+                    const left = /(^|[_\-.])l([_\-.]|$)/.test(lower) || /left/.test(lower) || /(^|[^a-z])l($|[^a-z])/.test(lower);
+                    const right = /(^|[_\-.])r([_\-.]|$)/.test(lower) || /right/.test(lower) || /(^|[^a-z])r($|[^a-z])/.test(lower);
                     const isLeft = role.startsWith('l');
                     if (isLeft && !left) score -= 1000;
                     if (!isLeft && role.startsWith('r') && !right) score -= 1000;
+                    if (left && isLeft) score += 100;
+                    if (right && !isLeft && role.startsWith('r')) score += 100;
 
                     if (role.endsWith('shoulder') && has('shoulder', 'clavicle')) score += 90;
                     if (role.endsWith('arm') && has('upperarm', 'arm')) score += 80;
@@ -887,25 +908,33 @@
             }
 
             // ========================================================
-            // MASTER TIMELINE CLOCK
-            // Audio currentTime drives the animation whenever audio exists.
+            // DETERMINISTIC MASTER TIMELINE CLOCK
             // ========================================================
             if (state.isPlaying) {
-                if (audioElement.src) {
-                    state.audioTime = audioElement.currentTime;
-                } else if (state.playStartWallTime !== undefined) {
-                    state.audioTime =
-                        state.playStartTimeline +
-                        (performance.now() - state.playStartWallTime) / 1000;
-                }
+                const elapsed = (performance.now() - state.playEpoch) / 1000;
+                const duration = getTimelineDuration();
 
-                const timelineDuration = getTimelineDuration();
-                if (!state.isRecording && timelineDuration > 0 && state.audioTime >= timelineDuration) {
-                    state.audioTime = timelineDuration;
-                    stopPlayback(false);
+                state.timelineClock = state.playBaseTime + elapsed;
+                state.audioTime = Math.min(state.timelineClock, duration);
+
+                // Keep real audio aligned to our animation clock.
+                // Do this infrequently so seeking the media element does not
+                // destabilize playback.
+                if (audioElement.src && audioElement.readyState >= 2) {
+                    if (Math.abs(audioElement.currentTime - state.audioTime) > 0.12) {
+                        try { audioElement.currentTime = state.audioTime; } catch (e) {}
+                    }
                 }
 
                 updateAudioUI(state.audioTime);
+
+                if (duration > 0 && state.audioTime >= duration) {
+                    if (state.isRecording) {
+                        state.audioTime = duration;
+                    } else {
+                        stopPlayback(false);
+                    }
+                }
             }
 
             let vocalEnergy = 0, highEnergy = 0;
@@ -922,8 +951,20 @@
 
             // --- 1. DETERMINE TARGET POSE & LERP ---
             const targetPose = getTargetPoseAtTime(state.audioTime);
-            
-            const poseSmoothing = state.isPlaying ? 8.0 : 20.0;
+
+            // Debug/diagnostic state: this makes it obvious whether playback
+            // is actually inside a timeline block.
+            if (state.isPlaying && currentModel && ui.info) {
+                const active = state.blocks.find(b =>
+                    state.audioTime >= Number(b.start) &&
+                    state.audioTime < Number(b.end)
+                );
+                ui.info.dataset.playback = active
+                    ? `PLAYING ${active.label} @ ${state.audioTime.toFixed(2)}s`
+                    : `PLAYING REST @ ${state.audioTime.toFixed(2)}s`;
+            }
+
+            const poseSmoothing = state.isPlaying ? 12.0 : 24.0;
             const poseAlpha = Math.min(1, delta * poseSmoothing);
 
             for (let key in state.smoothPose) {
@@ -1006,8 +1047,11 @@
                 setMorphUniversal(mesh, ['blink', 'fcleyeclose', 'eyesclosed'], state.isBlinkingNow, 0.8); 
             });
 
-            if (currentModel) currentModel.updateMatrixWorld(true);
-            controls.update(); renderer.render(scene, camera);
+            if (currentModel) {
+                currentModel.updateMatrixWorld(true);
+            }
+            controls.update();
+            renderer.render(scene, camera);
         }
         animate();
 
@@ -1152,9 +1196,11 @@
                 await new Promise(resolve => setTimeout(resolve, 100));
 
                 state.audioTime = 0;
-                state.playStartTimeline = 0;
-                state.playStartWallTime = performance.now();
+                state.playBaseTime = 0;
+                state.timelineClock = 0;
+                state.playEpoch = performance.now();
                 state.isPlaying = true;
+                applyTimelinePoseInstant(0);
 
                 if (audioElement.src) {
                     audioElement.currentTime = 0;
@@ -1171,9 +1217,6 @@
                         return;
                     }
 
-                    state.audioTime = audioElement.src
-                        ? audioElement.currentTime
-                        : state.audioTime;
                     updateAudioUI(state.audioTime);
 
                     if (state.audioTime >= duration - 0.03) {
@@ -1202,7 +1245,6 @@
             }
 
             state.isRecording = false;
-            state.isPlaying = false;
 
             if (audioElement.src) {
                 try { audioElement.pause(); } catch (e) {}
