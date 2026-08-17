@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cinematic Avatar Keyframer v8</title>
+    <title>Cinematic Avatar Keyframer v9</title>
     <style>
         :root {
             --bg-color: #f4f4f9; --panel-bg: #ffffff; --text-color: #333333;
@@ -91,18 +91,18 @@
 <body data-theme="dark">
 
     <div id="sidebar">
-        <!-- Persistent Audio Player -->
+        <!-- Persistent Player -->
         <div style="padding: 15px 15px 0 15px;">
             <div class="audio-player-box">
                 <div class="control-group">
                     <label>Timeline & Audio Scrubber</label>
-                    <input type="range" id="audioSeek" min="0" max="0" step="0.01" value="0" disabled>
+                    <input type="range" id="audioSeek" min="0" max="10" step="0.01" value="0">
                     <div class="audio-times">
                         <span id="timeCurrent">0.0s</span>
-                        <span id="timeTotal">0.0s</span>
+                        <span id="timeTotal">10.0s</span>
                     </div>
                 </div>
-                <button id="btnPlayPause" disabled style="width: 100%; margin-top: 8px;">Play / Pause Timeline</button>
+                <button id="btnPlayPause" style="width: 100%; margin-top: 8px;">Play / Pause Timeline</button>
             </div>
         </div>
 
@@ -119,7 +119,7 @@
             </div>
             <div id="diagnostics"><div id="model-info">Upload a model to initialize...</div></div>
             <div class="control-group">
-                <label>Load Audio Speech</label>
+                <label>Load Audio Speech (Optional)</label>
                 <input type="file" id="audioInput" accept="audio/*">
             </div>
 
@@ -159,6 +159,7 @@
         <!-- TAB 2: TIMELINE & POSE EDITOR -->
         <div id="tab-timeline" class="tab-content">
             
+            <!-- Add Block Area -->
             <div class="panel-section" style="background-color: #e8f4fd; border-color: #b8daff;">
                 <label style="color: var(--accent-color);">➕ Add Preset Block to Timeline</label>
                 <div class="row-group">
@@ -180,8 +181,10 @@
                 </div>
             </div>
 
+            <!-- Timeline List -->
             <div class="panel-section">
                 <label style="color: var(--accent-color);">Timeline Tracks</label>
+                <div style="font-size:0.7em; color:gray;">Click 'Tune' to override a preset for your specific model.</div>
                 <div id="timelineList"></div>
             </div>
 
@@ -196,34 +199,62 @@
                     <!-- LEFT SIDE -->
                     <div class="tuner-col">
                         <label style="color: var(--accent-color); font-size: 0.8em; text-align:center;">LEFT ARM</label>
-                        <div class="control-group"><label class="sub-label">Shoulder Pitch / Roll</label>
-                            <div class="row-group"><input type="range" class="pose-slider" data-key="lSP" min="-1" max="1" step="0.05"><input type="range" class="pose-slider" data-key="lSR" min="-1" max="1" step="0.05"></div>
+                        <div class="control-group"><label class="sub-label">Shoulder Pitch / Roll / Twist</label>
+                            <div class="row-group">
+                                <input type="range" class="pose-slider" data-key="lSP" min="-1" max="1" step="0.05" title="Pitch">
+                                <input type="range" class="pose-slider" data-key="lSR" min="-1" max="1" step="0.05" title="Roll">
+                                <input type="range" class="pose-slider" data-key="lSY" min="-1" max="1" step="0.05" title="Twist">
+                            </div>
                         </div>
                         <div class="control-group"><label class="sub-label">Arm Fwd/Back / Out/In / Twist</label>
-                            <div class="row-group"><input type="range" class="pose-slider" data-key="lAP" min="-2.5" max="2.5" step="0.05"><input type="range" class="pose-slider" data-key="lAR" min="-2.5" max="2.5" step="0.05"><input type="range" class="pose-slider" data-key="lAY" min="-2.5" max="2.5" step="0.05"></div>
+                            <div class="row-group">
+                                <input type="range" class="pose-slider" data-key="lAP" min="-2.5" max="2.5" step="0.05">
+                                <input type="range" class="pose-slider" data-key="lAR" min="-2.5" max="2.5" step="0.05">
+                                <input type="range" class="pose-slider" data-key="lAY" min="-2.5" max="2.5" step="0.05">
+                            </div>
                         </div>
                         <div class="control-group"><label class="sub-label">Elbow Bend / Twist</label>
-                            <div class="row-group"><input type="range" class="pose-slider" data-key="lFP" min="-2.8" max="2.8" step="0.05"><input type="range" class="pose-slider" data-key="lFY" min="-2.8" max="2.8" step="0.05"></div>
+                            <div class="row-group">
+                                <input type="range" class="pose-slider" data-key="lFP" min="-2.8" max="2.8" step="0.05">
+                                <input type="range" class="pose-slider" data-key="lFY" min="-2.8" max="2.8" step="0.05">
+                            </div>
                         </div>
                         <div class="control-group"><label class="sub-label">Wrist Bend / Twist</label>
-                            <div class="row-group"><input type="range" class="pose-slider" data-key="lHP" min="-1.5" max="1.5" step="0.05"><input type="range" class="pose-slider" data-key="lHR" min="-1.5" max="1.5" step="0.05"></div>
+                            <div class="row-group">
+                                <input type="range" class="pose-slider" data-key="lHP" min="-1.5" max="1.5" step="0.05">
+                                <input type="range" class="pose-slider" data-key="lHR" min="-1.5" max="1.5" step="0.05">
+                            </div>
                         </div>
                     </div>
                     
                     <!-- RIGHT SIDE -->
                     <div class="tuner-col">
                         <label style="color: var(--accent-color); font-size: 0.8em; text-align:center;">RIGHT ARM</label>
-                        <div class="control-group"><label class="sub-label">Shoulder Pitch / Roll</label>
-                            <div class="row-group"><input type="range" class="pose-slider" data-key="rSP" min="-1" max="1" step="0.05"><input type="range" class="pose-slider" data-key="rSR" min="-1" max="1" step="0.05"></div>
+                        <div class="control-group"><label class="sub-label">Shoulder Pitch / Roll / Twist</label>
+                            <div class="row-group">
+                                <input type="range" class="pose-slider" data-key="rSP" min="-1" max="1" step="0.05" title="Pitch">
+                                <input type="range" class="pose-slider" data-key="rSR" min="-1" max="1" step="0.05" title="Roll">
+                                <input type="range" class="pose-slider" data-key="rSY" min="-1" max="1" step="0.05" title="Twist">
+                            </div>
                         </div>
                         <div class="control-group"><label class="sub-label">Arm Fwd/Back / Out/In / Twist</label>
-                            <div class="row-group"><input type="range" class="pose-slider" data-key="rAP" min="-2.5" max="2.5" step="0.05"><input type="range" class="pose-slider" data-key="rAR" min="-2.5" max="2.5" step="0.05"><input type="range" class="pose-slider" data-key="rAY" min="-2.5" max="2.5" step="0.05"></div>
+                            <div class="row-group">
+                                <input type="range" class="pose-slider" data-key="rAP" min="-2.5" max="2.5" step="0.05">
+                                <input type="range" class="pose-slider" data-key="rAR" min="-2.5" max="2.5" step="0.05">
+                                <input type="range" class="pose-slider" data-key="rAY" min="-2.5" max="2.5" step="0.05">
+                            </div>
                         </div>
                         <div class="control-group"><label class="sub-label">Elbow Bend / Twist</label>
-                            <div class="row-group"><input type="range" class="pose-slider" data-key="rFP" min="-2.8" max="2.8" step="0.05"><input type="range" class="pose-slider" data-key="rFY" min="-2.8" max="2.8" step="0.05"></div>
+                            <div class="row-group">
+                                <input type="range" class="pose-slider" data-key="rFP" min="-2.8" max="2.8" step="0.05">
+                                <input type="range" class="pose-slider" data-key="rFY" min="-2.8" max="2.8" step="0.05">
+                            </div>
                         </div>
                         <div class="control-group"><label class="sub-label">Wrist Bend / Twist</label>
-                            <div class="row-group"><input type="range" class="pose-slider" data-key="rHP" min="-1.5" max="1.5" step="0.05"><input type="range" class="pose-slider" data-key="rHR" min="-1.5" max="1.5" step="0.05"></div>
+                            <div class="row-group">
+                                <input type="range" class="pose-slider" data-key="rHP" min="-1.5" max="1.5" step="0.05">
+                                <input type="range" class="pose-slider" data-key="rHR" min="-1.5" max="1.5" step="0.05">
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -242,10 +273,10 @@
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-        // --- PRESET POSE LIBRARY (18 Axis Coordinates) ---
+        // --- PRESET POSE LIBRARY (20 Axis Coordinates including Shoulder Yaw) ---
         const BaseRest = { 
-            lSP:0, lSR:0, lAP:0.1, lAR:0.15, lAY:0, lFP:0.1, lFY:0, lHP:0, lHR:0, 
-            rSP:0, rSR:0, rAP:0.1, rAR:0.15, rAY:0, rFP:0.1, rFY:0, rHP:0, rHR:0 
+            lSP:0, lSR:0, lSY:0, lAP:0.1, lAR:0.15, lAY:0, lFP:0.1, lFY:0, lHP:0, lHR:0, 
+            rSP:0, rSR:0, rSY:0, rAP:0.1, rAR:0.15, rAY:0, rFP:0.1, rFY:0, rHP:0, rHR:0 
         };
         
         const PoseLibrary = {
@@ -260,11 +291,11 @@
         const state = {
             isPlaying: false, isRecording: false, resolution: { w: 1920, h: 1080 },
             morphMeshes: [], bones: {}, initialBones: {},
-            time: 0, audioTime: 0, audioDuration: 0, speechEnergy: 0,
+            time: 0, audioTime: 0, audioDuration: 10, speechEnergy: 0,
             eyeTarget: new THREE.Vector2(0, 0), currentEyePos: new THREE.Vector2(0, 0), nextSaccadeTime: 0,
             blinkTimer: 0, nextBlinkTime: 2.0, isBlinkingNow: 0,
             
-            blocks: [], // { id, start, end, label, customPose }
+            blocks: [], // Array of Custom Timeline Poses
             editingBlockId: null,
             smoothPose: { ...BaseRest } 
         };
@@ -286,7 +317,6 @@
             editLabel: document.getElementById('editBlockLabel'), poseSliders: document.querySelectorAll('.pose-slider')
         };
 
-        // --- TABS ---
         ui.tabs.forEach(btn => {
             btn.addEventListener('click', () => {
                 ui.tabs.forEach(t => t.classList.remove('active'));
@@ -296,7 +326,7 @@
             });
         });
 
-        // --- TIMELINE BLOCKS ---
+        // --- TIMELINE MANAGEMENT ---
         function renderTimeline() {
             state.blocks.sort((a, b) => a.start - b.start);
             ui.tlList.innerHTML = '';
@@ -318,24 +348,13 @@
                 btnEdit.className = 'tl-btn tl-edit'; btnEdit.innerText = isEditing ? 'Tuning...' : 'Tune';
                 btnEdit.onclick = () => isEditing ? closePoseEditor() : openPoseEditor(block.id);
 
-                // COPY BUTTON FIX
                 const btnCopy = document.createElement('button');
                 btnCopy.className = 'tl-btn tl-copy'; btnCopy.innerText = 'Copy';
                 btnCopy.onclick = () => {
                     const duration = block.end - block.start;
-                    const newStart = block.end;
-                    const newBlock = {
-                        id: Date.now(),
-                        start: newStart,
-                        end: newStart + duration,
-                        label: block.label + ' (Copy)',
-                        customPose: JSON.parse(JSON.stringify(block.customPose))
-                    };
+                    const newBlock = { id: Date.now(), start: block.end, end: block.end + duration, label: block.label, customPose: JSON.parse(JSON.stringify(block.customPose)) };
                     state.blocks.push(newBlock);
-                    
-                    // Auto advance the UI adder to sit after the newly copied block
-                    ui.tlStart.value = newBlock.end.toFixed(1);
-                    ui.tlEnd.value = (newBlock.end + duration).toFixed(1);
+                    ui.tlStart.value = newBlock.end.toFixed(1); ui.tlEnd.value = (newBlock.end + duration).toFixed(1);
                     renderTimeline();
                 };
                 
@@ -364,11 +383,9 @@
             state.blocks.push({ id: Date.now(), start, end, label, customPose });
             ui.tlStart.value = end.toFixed(1);
             ui.tlEnd.value = (end + (end - start)).toFixed(1);
-            
             renderTimeline();
         });
 
-        // --- POSE EDITOR ---
         function openPoseEditor(blockId) {
             state.editingBlockId = blockId;
             const block = state.blocks.find(b => b.id === blockId);
@@ -382,8 +399,7 @@
                 slider.value = block.customPose[key] || 0;
             });
             
-            const midTime = block.start + ((block.end - block.start) / 2);
-            seekAudio(midTime);
+            seekAudio(block.start + ((block.end - block.start) / 2));
             renderTimeline();
         }
 
@@ -405,12 +421,14 @@
             });
         });
 
-        // --- AUDIO ENGINE ---
         function seekAudio(time) {
             state.audioTime = time;
             ui.audioSeek.value = time;
             ui.timeCur.innerText = time.toFixed(1) + 's';
-            if (state.isPlaying) playAudioAt(time);
+            if (state.isPlaying) {
+                if (sourceNode) { sourceNode.stop(); sourceNode.disconnect(); }
+                if (audioBuffer) playAudioAt(time);
+            }
         }
 
         ui.audioSeek.addEventListener('input', (e) => { seekAudio(parseFloat(e.target.value)); });
@@ -520,7 +538,7 @@
 
                 ui.info.innerHTML = `<span class="success">Rig Active! Model Ready.</span>`;
                 ui.centerBtn.disabled = false; centerAndFitModel();
-                if(audioBuffer) ui.rec.disabled = false;
+                ui.rec.disabled = false;
                 window.URL.revokeObjectURL(url);
             });
         });
@@ -539,45 +557,32 @@
                 analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.6;
                 dataArray = new Uint8Array(analyser.frequencyBinCount);
                 mediaStreamDest = audioContext.createMediaStreamDestination();
-                ui.play.disabled = false; if(currentModel) ui.rec.disabled = false;
+                if(currentModel) ui.rec.disabled = false;
             });
         });
 
         function playAudioAt(offset) {
-            if (sourceNode) { sourceNode.stop(); sourceNode.disconnect(); }
+            if (!audioBuffer) return;
             sourceNode = audioContext.createBufferSource(); 
             sourceNode.buffer = audioBuffer;
             sourceNode.connect(analyser); analyser.connect(audioContext.destination); analyser.connect(mediaStreamDest);
-            
             startTime = audioContext.currentTime - offset; 
             sourceNode.start(0, offset);
-            state.isPlaying = true; 
-            ui.play.innerText = 'Pause Timeline';
-            
-            sourceNode.onended = () => { 
-                if (state.isPlaying && (audioContext.currentTime - startTime) >= state.audioDuration - 0.1) { 
-                    state.isPlaying = false; ui.play.innerText = 'Play Timeline'; 
-                    state.audioTime = 0; ui.audioSeek.value = 0;
-                    if (state.isRecording) stopRecording(); 
-                } 
-            };
         }
 
         ui.play.addEventListener('click', async () => {
-            if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioContext.state === 'suspended') await audioContext.resume();
+            if (audioContext && audioContext.state === 'suspended') await audioContext.resume();
             
             if (state.isPlaying) {
-                if (sourceNode) sourceNode.stop();
                 state.isPlaying = false; ui.play.innerText = 'Play Timeline';
+                if (sourceNode) { try { sourceNode.stop(); } catch(e){} }
             } else {
-                // FIX: Close editor automatically when playing to allow timeline evaluation
-                if (state.editingBlockId) closePoseEditor();
-                playAudioAt(state.audioTime);
+                state.isPlaying = true; ui.play.innerText = 'Pause Timeline';
+                if (state.editingBlockId) closePoseEditor(); // Release editor lock for timeline playback
+                if (audioBuffer) playAudioAt(state.audioTime);
             }
         });
 
-        // --- ENGINE MATH ---
         function cleanName(n) { return n.toLowerCase().replace(/[^a-z0-9]/g, ''); }
         function setMorphUniversal(mesh, searchNames, value, speed = 0.4) {
             if (!mesh.morphTargetDictionary) return;
@@ -606,18 +611,16 @@
             bone.quaternion.multiply(offsetQ); 
         }
 
-        // FIX: Returns the correct pose based on timeline.
         function getTargetPoseAtTime(t) {
-            // ONLY force preview if we are actively editing AND paused. 
-            // If playing, ignore the edit lock and run the timeline.
+            // Editor Lock (Only applies when paused)
             if (state.editingBlockId && !state.isPlaying) {
                 const b = state.blocks.find(x => x.id === state.editingBlockId);
-                if (b) return b.customPose;
+                if (b) return { ...BaseRest, ...b.customPose };
             }
-            
+            // Timeline Evaluation
             for (let i = 0; i < state.blocks.length; i++) {
                 if (t >= state.blocks[i].start && t <= state.blocks[i].end) {
-                    return state.blocks[i].customPose;
+                    return { ...BaseRest, ...state.blocks[i].customPose }; // Guarantees all keys exist
                 }
             }
             return BaseRest; 
@@ -635,12 +638,26 @@
                 modelGroup.position.set(parseFloat(ui.posX.value)||0, parseFloat(ui.posY.value)||0, parseFloat(ui.posZ.value)||0);
             }
 
-            let vocalEnergy = 0, highEnergy = 0;
-            if (state.isPlaying && audioContext) {
-                state.audioTime = audioContext.currentTime - startTime;
+            // Sync Time Tracking (Works with or without Audio Track)
+            if (state.isPlaying) {
+                if (audioBuffer && audioContext && audioContext.state === 'running') {
+                    state.audioTime = audioContext.currentTime - startTime;
+                } else {
+                    state.audioTime += delta; // Fallback Virtual Clock
+                }
+                
+                // End state
+                if (state.audioTime >= state.audioDuration && state.audioDuration > 0) {
+                    state.isPlaying = false; ui.play.innerText = 'Play Timeline';
+                    state.audioTime = 0; if (state.isRecording) stopRecording();
+                }
+                
                 ui.audioSeek.value = state.audioTime;
                 ui.timeCur.innerText = state.audioTime.toFixed(1) + 's';
-                
+            }
+
+            let vocalEnergy = 0, highEnergy = 0;
+            if (state.isPlaying && analyser) {
                 analyser.getByteFrequencyData(dataArray);
                 for (let i = 2; i < 20; i++) vocalEnergy += dataArray[i];
                 vocalEnergy = (vocalEnergy / 18) / 255;
@@ -651,23 +668,23 @@
                 state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, 0, 0.1);
             }
 
-            // --- 1. DETERMINE TARGET POSE ---
+            // --- 1. DETERMINE TARGET POSE & LERP SMOOTHLY ---
             const targetPose = getTargetPoseAtTime(state.audioTime);
             
-            // Smoothly lerp the engine's internal state towards the target
             for (let key in state.smoothPose) {
-                state.smoothPose[key] = THREE.MathUtils.lerp(state.smoothPose[key], targetPose[key], delta * 8.0);
+                const tgt = targetPose[key] !== undefined ? targetPose[key] : 0; // Prevent NaN corruption
+                state.smoothPose[key] = THREE.MathUtils.lerp(state.smoothPose[key], tgt, delta * 8.0);
             }
 
             if (currentModel) {
                 const p = state.smoothPose;
                 // Apply Smoothed Base Poses
-                setBoneAbsolute(state.bones.lShoulder, p.lSP, 0, p.lSR);
+                setBoneAbsolute(state.bones.lShoulder, p.lSP, p.lSY, p.lSR);
                 setBoneAbsolute(state.bones.lArm, p.lAP, p.lAY, p.lAR);
                 setBoneAbsolute(state.bones.lFore, p.lFP, p.lFY, 0);
                 setBoneAbsolute(state.bones.lHand, p.lHP, 0, p.lHR);
 
-                setBoneAbsolute(state.bones.rShoulder, p.rSP, 0, p.rSR);
+                setBoneAbsolute(state.bones.rShoulder, p.rSP, p.rSY, p.rSR);
                 setBoneAbsolute(state.bones.rArm, p.rAP, p.rAY, -p.rAR); // Mirrored visually
                 setBoneAbsolute(state.bones.rFore, p.rFP, p.rFY, 0);
                 setBoneAbsolute(state.bones.rHand, p.rHP, 0, -p.rHR);
@@ -714,7 +731,7 @@
             }
 
             // --- 3. LIP SYNC ---
-            const mouthMax = parseFloat(ui.mouthAmp.value) || 0.8;
+            const mouthMax = parseFloat(ui.mouthAmp.value);
             state.morphMeshes.forEach(mesh => {
                 if (state.isPlaying) {
                     const jaw = vocalEnergy * 2.5 * mouthMax; 
@@ -736,51 +753,62 @@
         }
         animate();
 
-        // --- EXPORT FIX (138 byte WebM Fix) ---
+        // --- DEEP EXPORT FIX (Preventing 138-Byte crash) ---
         let mediaRecorder, chunks = [];
         ui.rec.addEventListener('click', () => state.isRecording ? stopRecording() : startRecording());
 
         function startRecording() {
-            if (!audioBuffer) return alert("Please load audio first.");
+            if (!currentModel) return alert("Please load a model first.");
             chunks = [];
             
-            // Stop current playback to ensure a clean start
-            if (sourceNode) { sourceNode.stop(); sourceNode.disconnect(); }
+            // 1. Reset timeline and audio cleanly
+            if (sourceNode) { try{sourceNode.stop();}catch(e){} }
             state.audioTime = 0; ui.audioSeek.value = 0;
             
-            // Start the audio exactly at 0
-            playAudioAt(0);
+            // 2. Cascade Fallback Options for highly-compatible Export
+            const canvasStream = renderer.domElement.captureStream(30); 
+            const audioTracks = mediaStreamDest ? mediaStreamDest.stream.getAudioTracks() : [];
+            const stream = new MediaStream([...canvasStream.getVideoTracks(), ...audioTracks]);
             
-            // Buffer to ensure Canvas has rendered and Audio tracks are flowing
+            const types = [
+                'video/webm;codecs=vp8,opus', // Most widely supported WebGL capture format
+                'video/webm',
+                'video/mp4'
+            ];
+            
+            let options = {};
+            for (let t of types) {
+                if (MediaRecorder.isTypeSupported(t)) {
+                    options = { mimeType: t, videoBitsPerSecond: 8000000 };
+                    break;
+                }
+            }
+
+            try { mediaRecorder = new MediaRecorder(stream, options); } 
+            catch (e) { mediaRecorder = new MediaRecorder(stream); } // Absolute fallback
+
+            mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(chunks, { type: mediaRecorder.mimeType });
+                if (blob.size < 1000) { alert("Export failed. File is too small. Keep the browser tab active while recording."); return; }
+                
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url;
+                a.download = `avatar_video.webm`;
+                a.click(); URL.revokeObjectURL(url);
+            };
+            
+            // 3. Buffer mechanism. Wait 300ms so Canvas definitely pushes frames to the stream.
             setTimeout(() => {
-                const canvasStream = renderer.domElement.captureStream(30);
-                const audioTracks = mediaStreamDest ? mediaStreamDest.stream.getAudioTracks() : [];
-                const stream = new MediaStream([...canvasStream.getVideoTracks(), ...audioTracks]);
-                
-                let options = { mimeType: 'video/webm' };
-                if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) options = { mimeType: 'video/webm;codecs=vp9,opus', videoBitsPerSecond: 5000000 };
-                else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) options = { mimeType: 'video/webm;codecs=vp8,opus', videoBitsPerSecond: 5000000 };
-                else if (MediaRecorder.isTypeSupported('video/mp4')) options = { mimeType: 'video/mp4' };
-
-                try { mediaRecorder = new MediaRecorder(stream, options); } 
-                catch (e) { mediaRecorder = new MediaRecorder(stream); } // Ultimate fallback
-
-                mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
-                mediaRecorder.onstop = () => {
-                    const blob = new Blob(chunks, { type: mediaRecorder.mimeType });
-                    if (blob.size < 1000) { alert("Export failed. File is too small. Keep the browser tab open while recording."); return; }
-                    
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a'); a.href = url;
-                    a.download = `avatar_video.webm`;
-                    a.click(); URL.revokeObjectURL(url);
-                };
-                
-                mediaRecorder.start(250); // Request data chunk every 250ms (prevents 138-byte crash)
+                mediaRecorder.start(1000); // 1-second chunks avoids memory crash
                 state.isRecording = true;
                 ui.rec.innerText = 'Stop & Export'; ui.rec.style.backgroundColor = '#6c757d';
-            }, 150); // 150ms buffer
+                
+                state.isPlaying = true;
+                if (audioBuffer) playAudioAt(0); // Start audio perfectly synced
+            }, 300);
         }
+        
         function stopRecording() {
             if (mediaRecorder) mediaRecorder.stop();
             state.isRecording = false; ui.rec.innerText = 'Record & Export Video'; ui.rec.style.backgroundColor = 'var(--danger-color)';
