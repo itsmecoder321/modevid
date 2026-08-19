@@ -106,6 +106,17 @@
                         <span id="timeTotal">10.0s</span>
                     </div>
                 </div>
+                <div id="waveformWrap" style="position:relative; margin-top:8px; height:52px; background:var(--bg-color); border:1px solid var(--border-color); border-radius:4px; overflow:hidden; cursor:pointer;">
+                    <canvas id="waveformCanvas" style="width:100%; height:100%; display:block;"></canvas>
+                    <div id="waveformPlayhead" style="position:absolute; top:0; bottom:0; left:0; width:2px; background:#ff3b30; pointer-events:none;"></div>
+                    <div id="waveformEmpty" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:0.7em; color:gray;">Load audio to see voice/silence waveform</div>
+                </div>
+                <div class="row-group" style="margin-top:4px; align-items:center;">
+                    <span class="sub-label" style="white-space:nowrap;">🟩 Voice &nbsp; ⬜ Silence</span>
+                    <div class="control-group" style="flex:1; margin:0;">
+                        <input type="range" id="silenceSensitivity" min="0.01" max="0.25" step="0.005" value="0.05" title="Silence sensitivity">
+                    </div>
+                </div>
                 <button id="btnPlayPause" style="width: 100%; margin-top: 8px;">Play / Pause Timeline</button>
             </div>
         </div>
@@ -212,6 +223,7 @@
                     </div>
                     <button id="btnAddBlock" style="flex: 1;">Add Block</button>
                 </div>
+                <button id="btnAutoFillVoice" style="margin-top:6px; background:#28a745;">⚡ Auto-Fill Blocks on Voice Segments</button>
             </div>
 
             <!-- Timeline Save/Load -->
@@ -376,6 +388,12 @@
             playStartWallTime: 0, playStartTimeline: 0,
             eyeTarget: new THREE.Vector2(0, 0), currentEyePos: new THREE.Vector2(0, 0), nextSaccadeTime: 0,
             blinkTimer: 0, nextBlinkTime: 2.0, isBlinkingNow: 0,
+
+            // Spectral viseme state (advanced lip sync)
+            visemeOpen: 0, visemeRound: 0, visemeWide: 0,
+            silenceThreshold: 0.05,
+            bandBins: null,
+            waveform: null, // { duration, points(Float32 0-1 rms), voice(Uint8 0/1), pointsPerSecond }
             
             blocks: [], // Array of Custom Timeline Poses
             editingBlockId: null,
@@ -391,6 +409,8 @@
             mouthAmp: document.getElementById('mouthAmp'), animSway: document.getElementById('animSway'),
             scale: document.getElementById('modScale'), posX: document.getElementById('modPosX'), posY: document.getElementById('modPosY'), posZ: document.getElementById('modPosZ'),
             audioSeek: document.getElementById('audioSeek'), timeCur: document.getElementById('timeCurrent'), timeTot: document.getElementById('timeTotal'),
+            waveformCanvas: document.getElementById('waveformCanvas'), waveformWrap: document.getElementById('waveformWrap'), waveformPlayhead: document.getElementById('waveformPlayhead'), waveformEmpty: document.getElementById('waveformEmpty'),
+            silenceSensitivity: document.getElementById('silenceSensitivity'), btnAutoFillVoice: document.getElementById('btnAutoFillVoice'),
             
             tlStart: document.getElementById('tlStart'), tlEnd: document.getElementById('tlEnd'), tlPreset: document.getElementById('tlPreset'),
             btnExportTimeline: document.getElementById('btnExportTimeline'), btnImportTimeline: document.getElementById('btnImportTimeline'), importTimelineFile: document.getElementById('importTimelineFile'),
@@ -659,6 +679,177 @@
             ui.audioSeek.value = Math.min(Math.max(time, 0), duration || 0);
             ui.timeCur.innerText = `${Math.max(0, time).toFixed(1)}s`;
             ui.timeTot.innerText = `${Math.max(0, duration).toFixed(1)}s`;
+            if (ui.waveformPlayhead) {
+                const frac = duration > 0 ? THREE.MathUtils.clamp(time / duration, 0, 1) : 0;
+                ui.waveformPlayhead.style.left = (frac * 100) + '%';
+            }
+        }
+
+        // ============================================================
+        // VOICE / SILENCE WAVEFORM (offline analysis of the loaded file)
+        // Lets you SEE where speech is before placing timeline blocks —
+        // green = voice detected, gray = silence.
+        // ============================================================
+        function mixToMono(buffer) {
+            const len = buffer.length;
+            const out = new Float32Array(len);
+            for (let c = 0; c < buffer.numberOfChannels; c++) {
+                const data = buffer.getChannelData(c);
+                for (let i = 0; i < len; i++) out[i] += data[i] / buffer.numberOfChannels;
+            }
+            return out;
+        }
+
+        function computeVoiceMask(points, pointsPerSecond, threshold) {
+            const n = points.length;
+            const voice = new Uint8Array(n);
+            for (let i = 0; i < n; i++) voice[i] = points[i] > threshold ? 1 : 0;
+
+            // Merge tiny silence gaps and drop tiny voice blips so the mask reads cleanly.
+            const minGapPoints = Math.max(1, Math.round(0.15 * pointsPerSecond));
+            const minSegPoints = Math.max(1, Math.round(0.08 * pointsPerSecond));
+
+            let i = 0;
+            while (i < n) {
+                if (voice[i] === 0) {
+                    let j = i; while (j < n && voice[j] === 0) j++;
+                    if ((j - i) < minGapPoints && i > 0 && j < n) { for (let k = i; k < j; k++) voice[k] = 1; }
+                    i = j;
+                } else i++;
+            }
+            i = 0;
+            while (i < n) {
+                if (voice[i] === 1) {
+                    let j = i; while (j < n && voice[j] === 1) j++;
+                    if ((j - i) < minSegPoints) { for (let k = i; k < j; k++) voice[k] = 0; }
+                    i = j;
+                } else i++;
+            }
+            return voice;
+        }
+
+        async function computeAndDrawWaveform(audioBuffer) {
+            const channelData = audioBuffer.numberOfChannels > 1 ? mixToMono(audioBuffer) : audioBuffer.getChannelData(0);
+            const duration = audioBuffer.duration;
+            const pointsPerSecond = 40;
+            const totalPoints = Math.max(50, Math.min(4000, Math.round(duration * pointsPerSecond)));
+            const samplesPerPoint = Math.max(1, Math.floor(channelData.length / totalPoints));
+            const rms = new Float32Array(totalPoints);
+            for (let p = 0; p < totalPoints; p++) {
+                let sum = 0;
+                const start = p * samplesPerPoint;
+                const end = Math.min(channelData.length, start + samplesPerPoint);
+                for (let i = start; i < end; i++) { const v = channelData[i]; sum += v * v; }
+                rms[p] = Math.sqrt(sum / Math.max(1, end - start));
+            }
+            let maxV = 0;
+            for (const v of rms) if (v > maxV) maxV = v;
+            if (maxV <= 0) maxV = 1;
+            const norm = new Float32Array(totalPoints);
+            for (let i = 0; i < totalPoints; i++) norm[i] = rms[i] / maxV;
+
+            // Auto-suggest a starting silence threshold from this file's own quiet parts,
+            // then let the slider fine-tune it.
+            const sorted = Array.from(norm).sort((a, b) => a - b);
+            const noiseFloor = sorted[Math.floor(sorted.length * 0.3)] || 0;
+            const suggested = THREE.MathUtils.clamp(noiseFloor + (1 - noiseFloor) * 0.10, 0.02, 0.2);
+            ui.silenceSensitivity.value = suggested.toFixed(3);
+            state.silenceThreshold = suggested;
+
+            state.waveform = {
+                duration, points: norm, pointsPerSecond,
+                voice: computeVoiceMask(norm, pointsPerSecond, suggested)
+            };
+            if (ui.waveformEmpty) ui.waveformEmpty.style.display = 'none';
+            drawWaveform();
+        }
+
+        function drawWaveform() {
+            if (!state.waveform || !ui.waveformCanvas || !ui.waveformWrap) return;
+            const dpr = window.devicePixelRatio || 1;
+            const w = ui.waveformWrap.clientWidth, h = ui.waveformWrap.clientHeight;
+            if (w === 0 || h === 0) return;
+            ui.waveformCanvas.width = w * dpr;
+            ui.waveformCanvas.height = h * dpr;
+            const ctx = ui.waveformCanvas.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+            const { points, voice } = state.waveform;
+            const n = points.length;
+            const barW = w / n;
+            for (let i = 0; i < n; i++) {
+                const amp = Math.max(0.04, points[i]);
+                const barH = amp * h;
+                ctx.fillStyle = voice[i] ? '#28a745' : 'rgba(150,150,150,0.45)';
+                ctx.fillRect(i * barW, (h - barH) / 2, Math.max(1, barW - 0.5), barH);
+            }
+        }
+
+        function getVoiceSegments() {
+            if (!state.waveform) return [];
+            const { voice, pointsPerSecond } = state.waveform;
+            const segments = [];
+            let i = 0;
+            while (i < voice.length) {
+                if (voice[i] === 1) {
+                    let j = i; while (j < voice.length && voice[j] === 1) j++;
+                    segments.push({ start: i / pointsPerSecond, end: j / pointsPerSecond });
+                    i = j;
+                } else i++;
+            }
+            return segments;
+        }
+
+        ui.waveformWrap.addEventListener('click', (e) => {
+            if (!state.waveform) return;
+            const rect = ui.waveformWrap.getBoundingClientRect();
+            const frac = THREE.MathUtils.clamp((e.clientX - rect.left) / rect.width, 0, 1);
+            seekAudio(frac * getTimelineDuration());
+        });
+
+        ui.silenceSensitivity.addEventListener('input', (e) => {
+            state.silenceThreshold = parseFloat(e.target.value) || 0.05;
+            if (state.waveform) {
+                state.waveform.voice = computeVoiceMask(state.waveform.points, state.waveform.pointsPerSecond, state.silenceThreshold);
+                drawWaveform();
+            }
+        });
+
+        window.addEventListener('resize', () => drawWaveform());
+
+        ui.btnAutoFillVoice.addEventListener('click', () => {
+            const segments = getVoiceSegments();
+            if (segments.length === 0) {
+                alert('No voice segments detected yet — load an audio file first (and check the waveform shows green regions).');
+                return;
+            }
+            const presetId = ui.tlPreset.value;
+            const label = ui.tlPreset.options[ui.tlPreset.selectedIndex].text;
+            if (state.blocks.length > 0 && !confirm(`Add ${segments.length} block(s), one per detected voice segment, using "${label}"?\nThis adds alongside your existing blocks — you can still edit/delete any of them after.`)) return;
+
+            segments.forEach((seg, idx) => {
+                state.blocks.push({
+                    id: Date.now() + idx,
+                    start: Math.round(seg.start * 10) / 10,
+                    end: Math.round(seg.end * 10) / 10,
+                    label,
+                    customPose: { ...PoseLibrary[presetId] }
+                });
+            });
+            renderTimeline();
+        });
+
+        // Maps speech-relevant frequency ranges (Hz) to analyser bin indices, so the
+        // viseme bands stay correct regardless of the audio device's sample rate.
+        function computeBandBins() {
+            const binHz = audioContext.sampleRate / analyser.fftSize;
+            const toBin = f => THREE.MathUtils.clamp(Math.round(f / binHz), 0, analyser.frequencyBinCount - 1);
+            state.bandBins = {
+                lowStart: toBin(80), lowEnd: toBin(500),     // fundamental + open-vowel body ("ah", "oh")
+                midStart: toBin(500), midEnd: toBin(2500),   // vowel formants ("ee", "ay")
+                highStart: toBin(2500), highEnd: toBin(6500) // sibilants/consonants ("s", "t", "ch")
+            };
+            return state.bandBins;
         }
 
         async function setupAudioGraph() {
@@ -672,8 +863,8 @@
 
             if (!audioGraphReady) {
                 analyser = audioContext.createAnalyser();
-                analyser.fftSize = 1024;
-                analyser.smoothingTimeConstant = 0.65;
+                analyser.fftSize = 2048; // finer frequency resolution -> better vowel/consonant separation
+                analyser.smoothingTimeConstant = 0.55;
                 dataArray = new Uint8Array(analyser.frequencyBinCount);
                 mediaStreamDest = audioContext.createMediaStreamDestination();
                 audioMediaSource = audioContext.createMediaElementSource(audioElement);
@@ -681,6 +872,7 @@
                 analyser.connect(audioContext.destination);
                 analyser.connect(mediaStreamDest);
                 audioGraphReady = true;
+                computeBandBins();
             }
         }
 
@@ -1009,8 +1201,20 @@
                 audioElement.load();
                 await setupAudioGraph();
 
-                ui.info.innerHTML = `<span class="success">Audio loaded: ${file.name}</span>`;
+                ui.info.innerHTML = `<span class="success">Audio loaded: ${file.name} — analyzing waveform...</span>`;
                 console.log('Audio loaded:', file.name, file.size, 'bytes');
+
+                // Decode a separate copy for offline RMS/voice analysis (independent of
+                // the <audio> element's own playback pipeline).
+                try {
+                    const arrayBuf = await file.arrayBuffer();
+                    const decoded = await audioContext.decodeAudioData(arrayBuf);
+                    await computeAndDrawWaveform(decoded);
+                    ui.info.innerHTML = `<span class="success">Audio loaded: ${file.name}</span>`;
+                } catch (waveErr) {
+                    console.warn('Waveform analysis failed (playback still works):', waveErr);
+                    ui.info.innerHTML = `<span class="warning">Audio loaded: ${file.name} (waveform preview unavailable)</span>`;
+                }
             } catch (error) {
                 console.error('Audio initialization failed:', error);
                 alert('Could not initialize the audio file.\n\n' + error.message);
@@ -1146,15 +1350,48 @@
                 }
             }
 
-            let vocalEnergy = 0, highEnergy = 0;
+            // ========================================================
+            // SPECTRAL VISEME ANALYSIS (advanced lip sync)
+            // Splits the spectrum into three speech-relevant bands and derives
+            // three independent mouth-shape dimensions instead of one generic
+            // "jaw open" amount, so different sounds actually look different:
+            //   visemeOpen  — low+mid energy  -> open youth vowels ("ah","eh")
+            //   visemeRound — low dominance    -> rounded vowels ("oh","oo")
+            //   visemeWide  — high dominance   -> sibilants/wide sounds ("s","ee")
+            // Below state.silenceThreshold (tunable via the waveform slider),
+            // everything gates to 0 so the mouth sits closed during silence
+            // instead of idling/mumbling.
+            // ========================================================
+            let isSilentNow = true;
             if (state.isPlaying && analyser) {
                 analyser.getByteFrequencyData(dataArray);
-                for (let i = 2; i < 20; i++) vocalEnergy += dataArray[i];
-                vocalEnergy = (vocalEnergy / 18) / 255;
-                for (let i = 20; i < 60; i++) highEnergy += dataArray[i];
-                highEnergy = (highEnergy / 40) / 255;
-                state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, vocalEnergy, 0.15);
+                const bb = state.bandBins || computeBandBins();
+
+                let lowE = 0, midE = 0, highE = 0;
+                for (let i = bb.lowStart; i < bb.lowEnd; i++) lowE += dataArray[i];
+                for (let i = bb.midStart; i < bb.midEnd; i++) midE += dataArray[i];
+                for (let i = bb.highStart; i < bb.highEnd; i++) highE += dataArray[i];
+                lowE /= (Math.max(1, bb.lowEnd - bb.lowStart) * 255);
+                midE /= (Math.max(1, bb.midEnd - bb.midStart) * 255);
+                highE /= (Math.max(1, bb.highEnd - bb.highStart) * 255);
+
+                const totalE = (lowE + midE + highE) / 3;
+                isSilentNow = totalE < state.silenceThreshold;
+
+                const openTarget = isSilentNow ? 0 : Math.min(1, lowE * 0.8 + midE * 1.1);
+                const roundTarget = isSilentNow ? 0 : Math.min(1, lowE / (lowE + highE + 0.05));
+                const wideTarget = isSilentNow ? 0 : Math.min(1, (highE / (midE + highE + 0.05)) * 0.85);
+
+                // Snap closed quickly on silence, open more fluidly on speech.
+                const openAlpha = isSilentNow ? 0.5 : 0.35;
+                state.visemeOpen = THREE.MathUtils.lerp(state.visemeOpen, openTarget, openAlpha);
+                state.visemeRound = THREE.MathUtils.lerp(state.visemeRound, roundTarget, 0.25);
+                state.visemeWide = THREE.MathUtils.lerp(state.visemeWide, wideTarget, 0.25);
+                state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, isSilentNow ? 0 : totalE, 0.18);
             } else {
+                state.visemeOpen = THREE.MathUtils.lerp(state.visemeOpen, 0, 0.3);
+                state.visemeRound = THREE.MathUtils.lerp(state.visemeRound, 0, 0.3);
+                state.visemeWide = THREE.MathUtils.lerp(state.visemeWide, 0, 0.3);
                 state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, 0, 0.1);
             }
             talk = state.speechEnergy;
@@ -1245,11 +1482,13 @@
             const mouthMax = parseFloat(ui.mouthAmp.value) || 0.8;
             state.morphMeshes.forEach(mesh => {
                 if (state.isPlaying) {
-                    const jaw = vocalEnergy * 2.5 * mouthMax; 
-                    setMorphUniversal(mesh, ['jawopen', 'mouthopen', 'visemeaa', 'vrcvaa', 'fclmtha', 'a', 'ah'], jaw, 0.4);
-                    setMorphUniversal(mesh, ['mouthfunnel', 'visemeu', 'visemeo', 'vrcvoh', 'fclmtho', 'o', 'u', 'oo', 'pucker'], highEnergy * mouthMax, 0.3);
-                    setMorphUniversal(mesh, ['mouthsmileleft', 'mouthsmileright', 'smile', 'fclmthe', 'e', 'ee'], 0.2 + (highEnergy * 0.4), 0.2);
-                    setMorphUniversal(mesh, ['browinnerup', 'browouterup', 'browsup', 'surprised'], talk * 0.8, 0.2);
+                    const jaw = state.visemeOpen * 1.4 * mouthMax;
+                    const round = state.visemeRound * mouthMax;
+                    const wide = state.visemeWide * mouthMax;
+                    setMorphUniversal(mesh, ['jawopen', 'mouthopen', 'visemeaa', 'vrcvaa', 'fclmtha', 'a', 'ah'], jaw, 0.45);
+                    setMorphUniversal(mesh, ['mouthfunnel', 'visemeu', 'visemeo', 'vrcvoh', 'fclmtho', 'o', 'u', 'oo', 'pucker'], round, 0.3);
+                    setMorphUniversal(mesh, ['mouthsmileleft', 'mouthsmileright', 'smile', 'fclmthe', 'e', 'ee'], 0.15 + (wide * 0.6), 0.25);
+                    setMorphUniversal(mesh, ['browinnerup', 'browouterup', 'browsup', 'surprised'], talk * 0.7, 0.2);
                 } else {
                     setMorphUniversal(mesh, ['jawopen', 'mouthopen', 'visemeaa', 'vrcvaa', 'fclmtha', 'a', 'ah', 'mouthfunnel', 'visemeu', 'visemeo', 'vrcvoh', 'fclmtho', 'o', 'u', 'oo', 'pucker'], 0, 0.2);
                     setMorphUniversal(mesh, ['mouthsmileleft', 'mouthsmileright', 'smile', 'fclmthe', 'e', 'ee'], 0.05, 0.1);
