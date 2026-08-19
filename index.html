@@ -179,6 +179,7 @@
                 <div class="row-group">
                     <div class="control-group" style="flex: 1;"><label class="sub-label">Start (s)</label><input type="number" id="tlStart" min="0" step="0.1" value="0.0"></div>
                     <div class="control-group" style="flex: 1;"><label class="sub-label">End (s)</label><input type="number" id="tlEnd" min="0.1" step="0.1" value="3.0"></div>
+                    <div class="control-group" style="flex: 1;"><label class="sub-label" title="When two blocks overlap, the higher priority one plays. Default 0.">Priority</label><input type="number" id="tlPriority" step="1" value="0"></div>
                 </div>
                 <div class="row-group" style="margin-top: 5px;">
                     <div class="control-group" style="flex: 2;">
@@ -412,7 +413,7 @@
             waveformCanvas: document.getElementById('waveformCanvas'), waveformWrap: document.getElementById('waveformWrap'), waveformPlayhead: document.getElementById('waveformPlayhead'), waveformEmpty: document.getElementById('waveformEmpty'),
             silenceSensitivity: document.getElementById('silenceSensitivity'), btnAutoFillVoice: document.getElementById('btnAutoFillVoice'),
             
-            tlStart: document.getElementById('tlStart'), tlEnd: document.getElementById('tlEnd'), tlPreset: document.getElementById('tlPreset'),
+            tlStart: document.getElementById('tlStart'), tlEnd: document.getElementById('tlEnd'), tlPreset: document.getElementById('tlPreset'), tlPriority: document.getElementById('tlPriority'),
             btnExportTimeline: document.getElementById('btnExportTimeline'), btnImportTimeline: document.getElementById('btnImportTimeline'), importTimelineFile: document.getElementById('importTimelineFile'),
             btnAddBlock: document.getElementById('btnAddBlock'), tlList: document.getElementById('timelineList'),
             tabs: document.querySelectorAll('.tab-btn'), tabContents: document.querySelectorAll('.tab-content'),
@@ -452,9 +453,13 @@
                 div.className = `tl-item ${isEditing ? 'editing' : ''}`;
                 
                 // HTML for the block including Inline Inputs
+                const priority = Number.isFinite(block.priority) ? block.priority : 0;
+                const priorityBadge = priority !== 0
+                    ? `<span style="font-size:0.75em; padding:1px 6px; border-radius:3px; margin-left:6px; background:${priority > 0 ? '#28a745' : '#dc3545'}; color:white;">P${priority > 0 ? '+' : ''}${priority}</span>`
+                    : '';
                 div.innerHTML = `
                     <div class="tl-header">
-                        <b>${block.label}</b>
+                        <b>${block.label}${priorityBadge}</b>
                         <div class="tl-actions">
                             <button class="tl-btn tl-edit" id="edit-${block.id}">${isEditing ? 'Tuning...' : 'Tune'}</button>
                             <button class="tl-btn tl-copy" id="values-${block.id}" style="background:#b8860b;">Values</button>
@@ -467,6 +472,8 @@
                         <input type="number" class="time-input" value="${block.start.toFixed(1)}" step="0.1" onchange="window.updateBlockTime(${block.id}, 'start', this.value)">
                         <label class="sub-label" style="margin:0;">End:</label>
                         <input type="number" class="time-input" value="${block.end.toFixed(1)}" step="0.1" onchange="window.updateBlockTime(${block.id}, 'end', this.value)">
+                        <label class="sub-label" style="margin:0;" title="When two blocks overlap, higher priority wins.">Priority:</label>
+                        <input type="number" class="time-input" value="${priority}" step="1" onchange="window.updateBlockTime(${block.id}, 'priority', this.value)">
                     </div>
                 `;
                 
@@ -488,7 +495,7 @@
                 };
                 document.getElementById(`copy-${block.id}`).onclick = () => {
                     const duration = block.end - block.start;
-                    const newBlock = { id: Date.now(), start: block.end, end: block.end + duration, label: block.label, customPose: JSON.parse(JSON.stringify(block.customPose)) };
+                    const newBlock = { id: Date.now(), start: block.end, end: block.end + duration, label: block.label, priority: block.priority || 0, customPose: JSON.parse(JSON.stringify(block.customPose)) };
                     state.blocks.push(newBlock);
                     ui.tlStart.value = newBlock.end.toFixed(1); ui.tlEnd.value = (newBlock.end + duration).toFixed(1);
                     renderTimeline();
@@ -509,8 +516,9 @@
             const presetId = ui.tlPreset.value;
             const label = ui.tlPreset.options[ui.tlPreset.selectedIndex].text;
             const customPose = { ...PoseLibrary[presetId] }; 
+            const priority = parseInt(ui.tlPriority.value, 10) || 0;
             
-            state.blocks.push({ id: Date.now(), start, end, label, customPose });
+            state.blocks.push({ id: Date.now(), start, end, label, priority, customPose });
             ui.tlStart.value = end.toFixed(1);
             ui.tlEnd.value = (end + (end - start)).toFixed(1);
             renderTimeline();
@@ -530,12 +538,13 @@
             }
             const payload = {
                 schema: 'avatar-keyframer-timeline',
-                version: 1,
+                version: 2, // v2 adds per-block priority
                 exportedAt: new Date().toISOString(),
                 blocks: state.blocks.map(b => ({
                     start: b.start,
                     end: b.end,
                     label: b.label,
+                    priority: Number.isFinite(b.priority) ? b.priority : 0,
                     customPose: b.customPose
                 }))
             };
@@ -582,6 +591,7 @@
                         start: raw.start,
                         end: raw.end,
                         label: typeof raw.label === 'string' && raw.label ? raw.label : 'Imported Pose',
+                        priority: Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 0, // older exports (v1) had no priority -> defaults to 0
                         customPose
                     });
                 }
@@ -833,6 +843,7 @@
                     start: Math.round(seg.start * 10) / 10,
                     end: Math.round(seg.end * 10) / 10,
                     label,
+                    priority: 0,
                     customPose: { ...PoseLibrary[presetId] }
                 });
             });
@@ -1263,21 +1274,36 @@
         // ============================================================
         // TIMELINE RESOLVER
         // ============================================================
+        function getActiveBlockAtTime(t) {
+            let activeBlock = null;
+            for (const block of state.blocks) {
+                const start = Number(block.start);
+                const end = Number(block.end);
+                if (!Number.isFinite(start) || !Number.isFinite(end) || t < start || t >= end) continue;
+
+                if (!activeBlock) { activeBlock = block; continue; }
+                const bp = Number.isFinite(block.priority) ? block.priority : 0;
+                const ap = Number.isFinite(activeBlock.priority) ? activeBlock.priority : 0;
+                if (bp > ap) { activeBlock = block; continue; }
+                if (bp < ap) continue;
+                if (block.start > activeBlock.start) { activeBlock = block; continue; }
+                if (block.start < activeBlock.start) continue;
+                if (block.id > activeBlock.id) activeBlock = block;
+            }
+            return activeBlock;
+        }
+
         function getTargetPoseAtTime(t) {
             if (state.editingBlockId && !state.isPlaying) {
                 const editingBlock = state.blocks.find(x => x.id === state.editingBlockId);
                 if (editingBlock) return { ...BaseRest, ...editingBlock.customPose };
             }
 
-            let activeBlock = null;
-            for (const block of state.blocks) {
-                const start = Number(block.start);
-                const end = Number(block.end);
-                if (Number.isFinite(start) && Number.isFinite(end) && t >= start && t < end) {
-                    activeBlock = block;
-                    break;
-                }
-            }
+            // Collect every block active at time t, then pick the winner:
+            //   1. highest priority wins (default 0; can be negative or positive)
+            //   2. tie -> the block that starts later wins (more specific/local override)
+            //   3. still tied -> the block added most recently (higher id) wins
+            const activeBlock = getActiveBlockAtTime(t);
 
             return activeBlock
                 ? { ...BaseRest, ...activeBlock.customPose }
@@ -1403,10 +1429,7 @@
             // Debug/diagnostic state: this makes it obvious whether playback
             // is actually inside a timeline block.
             if (state.isPlaying && currentModel && ui.info) {
-                const active = state.blocks.find(b =>
-                    poseClock >= Number(b.start) &&
-                    poseClock < Number(b.end)
-                );
+                const active = getActiveBlockAtTime(poseClock);
                 ui.info.dataset.playback = active
                     ? `PLAYING ${active.label} @ ${poseClock.toFixed(2)}s`
                     : `PLAYING REST @ ${poseClock.toFixed(2)}s`;
