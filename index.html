@@ -214,6 +214,17 @@
                 </div>
             </div>
 
+            <!-- Timeline Save/Load -->
+            <div class="panel-section" style="background-color: #fff6e0; border-color: #ffe6a8;">
+                <label style="color: #b8860b;">💾 Timeline File</label>
+                <div class="row-group">
+                    <button id="btnExportTimeline" style="flex:1; background: #b8860b;">Export Timeline (.json)</button>
+                    <button id="btnImportTimeline" style="flex:1; background: #6c757d;">Import Timeline</button>
+                </div>
+                <input type="file" id="importTimelineFile" accept="application/json" style="display:none;">
+                <div class="sub-label" style="margin-top:2px;">Saves/loads every block's start, end, label and exact tuned pose values — nothing else is touched (model, audio, and settings stay as-is).</div>
+            </div>
+
             <!-- DYNAMIC POSE TUNER (Moved above timeline for visibility) -->
             <div id="poseEditorPanel">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -382,6 +393,7 @@
             audioSeek: document.getElementById('audioSeek'), timeCur: document.getElementById('timeCurrent'), timeTot: document.getElementById('timeTotal'),
             
             tlStart: document.getElementById('tlStart'), tlEnd: document.getElementById('tlEnd'), tlPreset: document.getElementById('tlPreset'),
+            btnExportTimeline: document.getElementById('btnExportTimeline'), btnImportTimeline: document.getElementById('btnImportTimeline'), importTimelineFile: document.getElementById('importTimelineFile'),
             btnAddBlock: document.getElementById('btnAddBlock'), tlList: document.getElementById('timelineList'),
             tabs: document.querySelectorAll('.tab-btn'), tabContents: document.querySelectorAll('.tab-content'),
             editorPanel: document.getElementById('poseEditorPanel'), btnDoneEdit: document.getElementById('btnDoneEdit'),
@@ -425,6 +437,7 @@
                         <b>${block.label}</b>
                         <div class="tl-actions">
                             <button class="tl-btn tl-edit" id="edit-${block.id}">${isEditing ? 'Tuning...' : 'Tune'}</button>
+                            <button class="tl-btn tl-copy" id="values-${block.id}" style="background:#b8860b;">Values</button>
                             <button class="tl-btn tl-copy" id="copy-${block.id}">Copy</button>
                             <button class="tl-btn tl-delete" id="del-${block.id}">X</button>
                         </div>
@@ -441,6 +454,18 @@
 
                 // Attach Event Listeners
                 document.getElementById(`edit-${block.id}`).onclick = () => isEditing ? closePoseEditor() : openPoseEditor(block.id);
+                document.getElementById(`values-${block.id}`).onclick = () => {
+                    const payload = JSON.stringify(block.customPose, null, 2);
+                    const shareText = `${block.label} (source preset track):\n${payload}`;
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(shareText).then(
+                            () => alert('Pose values copied to clipboard — paste them to me if you want this baked in as the new default for that preset.'),
+                            () => window.prompt('Copy these pose values:', shareText)
+                        );
+                    } else {
+                        window.prompt('Copy these pose values:', shareText);
+                    }
+                };
                 document.getElementById(`copy-${block.id}`).onclick = () => {
                     const duration = block.end - block.start;
                     const newBlock = { id: Date.now(), start: block.end, end: block.end + duration, label: block.label, customPose: JSON.parse(JSON.stringify(block.customPose)) };
@@ -469,6 +494,104 @@
             ui.tlStart.value = end.toFixed(1);
             ui.tlEnd.value = (end + (end - start)).toFixed(1);
             renderTimeline();
+        });
+
+        // ============================================================
+        // TIMELINE EXPORT / IMPORT
+        // Saves the exact tuned pose values for every block, not just the
+        // preset name — so once you've hand-tuned something you never have
+        // to redo that tuning again. Model, audio and slider settings are
+        // NOT included; only blocks (start, end, label, customPose).
+        // ============================================================
+        function exportTimeline() {
+            if (state.blocks.length === 0) {
+                alert('Timeline is empty — nothing to export.');
+                return;
+            }
+            const payload = {
+                schema: 'avatar-keyframer-timeline',
+                version: 1,
+                exportedAt: new Date().toISOString(),
+                blocks: state.blocks.map(b => ({
+                    start: b.start,
+                    end: b.end,
+                    label: b.label,
+                    customPose: b.customPose
+                }))
+            };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `timeline_${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+        }
+
+        function importTimelineFromFile(file) {
+            const reader = new FileReader();
+            reader.onload = () => {
+                let data;
+                try {
+                    data = JSON.parse(reader.result);
+                } catch (err) {
+                    alert('That file is not valid JSON.');
+                    return;
+                }
+                if (!data || !Array.isArray(data.blocks)) {
+                    alert('This does not look like a timeline export (missing "blocks" array).');
+                    return;
+                }
+
+                const validKeys = Object.keys(BaseRest);
+                const imported = [];
+                for (const raw of data.blocks) {
+                    if (typeof raw.start !== 'number' || typeof raw.end !== 'number' || raw.start >= raw.end) continue;
+                    const customPose = { ...BaseRest };
+                    if (raw.customPose && typeof raw.customPose === 'object') {
+                        for (const key of validKeys) {
+                            if (Number.isFinite(Number(raw.customPose[key]))) {
+                                customPose[key] = Number(raw.customPose[key]);
+                            }
+                        }
+                    }
+                    imported.push({
+                        id: Date.now() + imported.length,
+                        start: raw.start,
+                        end: raw.end,
+                        label: typeof raw.label === 'string' && raw.label ? raw.label : 'Imported Pose',
+                        customPose
+                    });
+                }
+
+                if (imported.length === 0) {
+                    alert('No valid blocks found in that file.');
+                    return;
+                }
+
+                const replace = state.blocks.length === 0 || confirm(
+                    `Import ${imported.length} block(s)?\nOK = replace current timeline\nCancel = add alongside existing blocks`
+                );
+                if (replace) {
+                    state.blocks = imported;
+                } else {
+                    state.blocks = state.blocks.concat(imported);
+                }
+                closePoseEditor();
+                renderTimeline();
+                seekAudio(state.audioTime);
+            };
+            reader.readAsText(file);
+        }
+
+        ui.btnExportTimeline.addEventListener('click', exportTimeline);
+        ui.btnImportTimeline.addEventListener('click', () => ui.importTimelineFile.click());
+        ui.importTimelineFile.addEventListener('change', (e) => {
+            const file = e.target.files?.[0];
+            if (file) importTimelineFromFile(file);
+            e.target.value = '';
         });
 
         function openPoseEditor(blockId) {
