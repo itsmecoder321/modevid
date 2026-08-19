@@ -398,6 +398,7 @@
             
             blocks: [], // Array of Custom Timeline Poses
             editingBlockId: null,
+            editingBatchId: null, // when set, pose slider edits apply to EVERY block sharing this batchId at once
             smoothPose: { ...BaseRest } 
         };
 
@@ -445,6 +446,38 @@
             
             if (state.blocks.length === 0) {
                 ui.tlList.innerHTML = '<div style="font-size:0.8em; color:gray; padding:5px;">Timeline is empty. Avatar will stay in Resting Pose.</div>';
+                return;
+            }
+
+            // --- Batch summary bar: one row per group of blocks added together
+            // (e.g. via Auto-Fill on Voice), with a single "Tune All" control that
+            // edits every member's pose at once instead of one block at a time.
+            const batchIds = [...new Set(state.blocks.map(b => b.batchId).filter(Boolean))];
+            for (const batchId of batchIds) {
+                const members = state.blocks.filter(b => b.batchId === batchId);
+                const isTuningBatch = state.editingBatchId === batchId;
+                const bar = document.createElement('div');
+                bar.className = `tl-item ${isTuningBatch ? 'editing' : ''}`;
+                bar.style.background = 'var(--block-bg)';
+                bar.innerHTML = `
+                    <div class="tl-header">
+                        <b>🔗 Batch: ${members[0].label} <span class="sub-label" style="margin:0;">(${members.length} blocks)</span></b>
+                        <div class="tl-actions">
+                            <button class="tl-btn tl-edit" id="tuneall-${batchId}">${isTuningBatch ? 'Tuning All...' : 'Tune All'}</button>
+                            <button class="tl-btn tl-delete" id="delbatch-${batchId}">Delete Batch</button>
+                        </div>
+                    </div>
+                    <div class="sub-label" style="margin:0;">Adjusting sliders here updates all ${members.length} blocks in this batch together.</div>
+                `;
+                ui.tlList.appendChild(bar);
+                document.getElementById(`tuneall-${batchId}`).onclick = () => isTuningBatch ? closePoseEditor() : openBatchPoseEditor(batchId);
+                document.getElementById(`delbatch-${batchId}`).onclick = () => {
+                    if (!confirm(`Delete all ${members.length} blocks in this batch?`)) return;
+                    const memberIds = new Set(members.map(m => m.id));
+                    state.blocks = state.blocks.filter(b => !memberIds.has(b.id));
+                    if (state.editingBatchId === batchId) closePoseEditor();
+                    renderTimeline();
+                };
             }
 
             state.blocks.forEach(block => {
@@ -457,9 +490,12 @@
                 const priorityBadge = priority !== 0
                     ? `<span style="font-size:0.75em; padding:1px 6px; border-radius:3px; margin-left:6px; background:${priority > 0 ? '#28a745' : '#dc3545'}; color:white;">P${priority > 0 ? '+' : ''}${priority}</span>`
                     : '';
+                const batchBadge = block.batchId
+                    ? `<span style="font-size:0.75em; padding:1px 6px; border-radius:3px; margin-left:6px; background:#6c757d; color:white;" title="Part of a batch — use Tune All above to edit the whole group at once">🔗</span>`
+                    : '';
                 div.innerHTML = `
                     <div class="tl-header">
-                        <b>${block.label}${priorityBadge}</b>
+                        <b>${block.label}${priorityBadge}${batchBadge}</b>
                         <div class="tl-actions">
                             <button class="tl-btn tl-edit" id="edit-${block.id}">${isEditing ? 'Tuning...' : 'Tune'}</button>
                             <button class="tl-btn tl-copy" id="values-${block.id}" style="background:#b8860b;">Values</button>
@@ -495,7 +531,7 @@
                 };
                 document.getElementById(`copy-${block.id}`).onclick = () => {
                     const duration = block.end - block.start;
-                    const newBlock = { id: Date.now(), start: block.end, end: block.end + duration, label: block.label, priority: block.priority || 0, customPose: JSON.parse(JSON.stringify(block.customPose)) };
+                    const newBlock = { id: Date.now(), start: block.end, end: block.end + duration, label: block.label, priority: block.priority || 0, batchId: block.batchId || null, customPose: JSON.parse(JSON.stringify(block.customPose)) };
                     state.blocks.push(newBlock);
                     ui.tlStart.value = newBlock.end.toFixed(1); ui.tlEnd.value = (newBlock.end + duration).toFixed(1);
                     renderTimeline();
@@ -538,13 +574,14 @@
             }
             const payload = {
                 schema: 'avatar-keyframer-timeline',
-                version: 2, // v2 adds per-block priority
+                version: 3, // v3 adds batchId (for Tune All groups)
                 exportedAt: new Date().toISOString(),
                 blocks: state.blocks.map(b => ({
                     start: b.start,
                     end: b.end,
                     label: b.label,
                     priority: Number.isFinite(b.priority) ? b.priority : 0,
+                    batchId: b.batchId || null,
                     customPose: b.customPose
                 }))
             };
@@ -592,6 +629,7 @@
                         end: raw.end,
                         label: typeof raw.label === 'string' && raw.label ? raw.label : 'Imported Pose',
                         priority: Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 0, // older exports (v1) had no priority -> defaults to 0
+                        batchId: typeof raw.batchId === 'string' && raw.batchId ? raw.batchId : null, // older exports (v1/v2) had no batchId -> ungrouped
                         customPose
                     });
                 }
@@ -626,6 +664,7 @@
 
         function openPoseEditor(blockId) {
             state.editingBlockId = blockId;
+            state.editingBatchId = null;
             const block = state.blocks.find(b => b.id === blockId);
             if (!block) return;
             
@@ -641,8 +680,30 @@
             renderTimeline();
         }
 
+        // Bulk-tune every block that shares a batchId (e.g. all blocks created by
+        // one Auto-Fill on Voice run) from a single set of sliders — move a slider
+        // once and every member of the batch gets that value.
+        function openBatchPoseEditor(batchId) {
+            const members = state.blocks.filter(b => b.batchId === batchId);
+            if (members.length === 0) return;
+
+            state.editingBlockId = null;
+            state.editingBatchId = batchId;
+            ui.editorPanel.classList.add('active');
+
+            // Seed sliders from the first member's current pose.
+            ui.poseSliders.forEach(slider => {
+                const key = slider.getAttribute('data-key');
+                slider.value = members[0].customPose[key] || 0;
+            });
+
+            seekAudio(members[0].start + ((members[0].end - members[0].start) / 2));
+            renderTimeline();
+        }
+
         function closePoseEditor() {
             state.editingBlockId = null;
+            state.editingBatchId = null;
             ui.editorPanel.classList.remove('active');
             renderTimeline();
         }
@@ -650,11 +711,15 @@
 
         ui.poseSliders.forEach(slider => {
             slider.addEventListener('input', (e) => {
-                if (!state.editingBlockId) return;
-                const block = state.blocks.find(b => b.id === state.editingBlockId);
-                if (block) {
-                    const key = e.target.getAttribute('data-key');
-                    block.customPose[key] = parseFloat(e.target.value);
+                const key = e.target.getAttribute('data-key');
+                const value = parseFloat(e.target.value);
+                if (state.editingBatchId) {
+                    state.blocks.forEach(b => {
+                        if (b.batchId === state.editingBatchId) b.customPose[key] = value;
+                    });
+                } else if (state.editingBlockId) {
+                    const block = state.blocks.find(b => b.id === state.editingBlockId);
+                    if (block) block.customPose[key] = value;
                 }
             });
         });
@@ -837,6 +902,7 @@
             const label = ui.tlPreset.options[ui.tlPreset.selectedIndex].text;
             if (state.blocks.length > 0 && !confirm(`Add ${segments.length} block(s), one per detected voice segment, using "${label}"?\nThis adds alongside your existing blocks — you can still edit/delete any of them after.`)) return;
 
+            const batchId = `batch_${Date.now()}`;
             segments.forEach((seg, idx) => {
                 state.blocks.push({
                     id: Date.now() + idx,
@@ -844,6 +910,7 @@
                     end: Math.round(seg.end * 10) / 10,
                     label,
                     priority: 0,
+                    batchId,
                     customPose: { ...PoseLibrary[presetId] }
                 });
             });
@@ -1297,6 +1364,10 @@
             if (state.editingBlockId && !state.isPlaying) {
                 const editingBlock = state.blocks.find(x => x.id === state.editingBlockId);
                 if (editingBlock) return { ...BaseRest, ...editingBlock.customPose };
+            }
+            if (state.editingBatchId && !state.isPlaying) {
+                const firstMember = state.blocks.find(x => x.batchId === state.editingBatchId);
+                if (firstMember) return { ...BaseRest, ...firstMember.customPose };
             }
 
             // Collect every block active at time t, then pick the winner:
