@@ -129,8 +129,9 @@
         <!-- TAB 1: SETUP -->
         <div id="tab-setup" class="tab-content active">
             <div class="control-group">
-                <label>Load 3D Model (.glb)</label>
-                <input type="file" id="glbInput" accept=".glb">
+                <label>Load 3D Model</label>
+                <input type="file" id="glbInput" accept=".glb,.gltf,.fbx,.obj,.stl,.mtl,.bin,.png,.jpg,.jpeg,.webp" multiple>
+                <div class="sub-label" style="margin-top:2px;">Supports .glb, .gltf, .fbx, .obj, .stl. For .obj with textures or .gltf with a .bin, select the model file together with its .mtl/.bin/image files (multi-select). STL has geometry only — no rig or morphs, so lip sync/poses won't apply to it.</div>
             </div>
             <div id="diagnostics"><div id="model-info">Upload a model to initialize...</div></div>
             <div class="control-group">
@@ -328,6 +329,10 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+        import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+        import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+        import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 
         // --- PRESET POSE LIBRARY (20 Axes) ---
         const BaseRest = { 
@@ -1124,142 +1129,215 @@
         }
         ui.centerBtn.addEventListener('click', centerAndFitModel);
 
-        ui.glb.addEventListener('change', e => {
-            const file = e.target.files[0];
-            if (!file) return;
-            ui.info.innerHTML = "Parsing Model & Extracting Skeleton...";
-            
-            const url = window.URL.createObjectURL(file);
-            new GLTFLoader().load(url, gltf => {
-                if (currentModel) modelGroup.remove(currentModel);
-                currentModel = gltf.scene;
-                modelGroup.add(currentModel);
-                
-                state.morphMeshes = []; state.bones = {}; state.initialBones = {};
-                let blendshapeCount = 0;
-                const allBones = [];
+        // Shared post-load pipeline: works the same regardless of which loader
+        // produced the Object3D (GLTF scene, FBX group, OBJ group, or an STL mesh).
+        function processLoadedModel(object3D, formatLabel) {
+            if (currentModel) modelGroup.remove(currentModel);
+            currentModel = object3D;
+            modelGroup.add(currentModel);
 
-                // Capture every bone first.  Do NOT trust a single naming convention.
-                currentModel.traverse(node => {
-                    if (node.isMesh) {
-                        node.castShadow = true;
-                        if (node.morphTargetDictionary) {
-                            state.morphMeshes.push(node);
-                            blendshapeCount += Object.keys(node.morphTargetDictionary).length;
-                        }
-                    }
-                    if (node.isBone) {
-                        allBones.push(node);
-                        state.initialBones[node.uuid] = {
-                            q: node.quaternion.clone(),
-                            p: node.position.clone()
-                        };
-                    }
-                });
+            state.morphMeshes = []; state.bones = {}; state.initialBones = {};
+            let blendshapeCount = 0;
+            const allBones = [];
 
-                function normBoneName(name) {
-                    return String(name || '')
-                        .toLowerCase()
-                        .replace(/[^a-z0-9]/g, '');
+            // Capture every bone first.  Do NOT trust a single naming convention.
+            currentModel.traverse(node => {
+                if (node.isMesh) {
+                    node.castShadow = true;
+                    if (node.morphTargetDictionary) {
+                        state.morphMeshes.push(node);
+                        blendshapeCount += Object.keys(node.morphTargetDictionary).length;
+                    }
                 }
-
-                function scoreBone(name, role) {
-                    const n = normBoneName(name);
-                    const has = (...terms) => terms.some(t => n.includes(t));
-                    let score = 0;
-
-                    if (role === 'hips') {
-                        if (has('hips', 'pelvis', 'root')) score += 100;
-                    }
-                    if (role === 'spine') {
-                        if (has('spine')) score += 40;
-                        if (has('chest', 'upperchest')) score -= 30;
-                        if (has('spine1', 'spine2', 'spine3', 'spine4')) score -= 10;
-                    }
-                    if (role === 'chest') {
-                        if (has('chest', 'upperchest', 'spine2', 'spine3')) score += 80;
-                        if (has('spine')) score += 10;
-                    }
-                    if (role === 'neck' && has('neck')) score += 100;
-                    if (role === 'head' && has('head')) score += 100;
-
-                    const lower = name.toLowerCase();
-                    const left = /(^|[_\-.])l([_\-.]|$)/.test(lower) || /left/.test(lower) || /(^|[^a-z])l($|[^a-z])/.test(lower);
-                    const right = /(^|[_\-.])r([_\-.]|$)/.test(lower) || /right/.test(lower) || /(^|[^a-z])r($|[^a-z])/.test(lower);
-                    const isLeft = role.startsWith('l');
-                    if (isLeft && !left) score -= 1000;
-                    if (!isLeft && role.startsWith('r') && !right) score -= 1000;
-                    if (left && isLeft) score += 100;
-                    if (right && !isLeft && role.startsWith('r')) score += 100;
-
-                    if (role.endsWith('shoulder') && has('shoulder', 'clavicle')) score += 90;
-                    if (role.endsWith('arm') && has('upperarm', 'arm')) score += 80;
-                    if (role.endsWith('fore') && has('forearm', 'lowerarm', 'elbow')) score += 90;
-                    if (role.endsWith('hand') && has('hand', 'wrist')) score += 90;
-                    if (role.endsWith('eye') && has('eye')) score += 90;
-
-                    // Strongly prefer explicit side words and exact semantic names.
-                    if (isLeft && has('left')) score += 30;
-                    if (!isLeft && role.startsWith('r') && has('right')) score += 30;
-                    if (role.endsWith('arm') && has('upperarm')) score += 25;
-                    if (role.endsWith('fore') && has('forearm')) score += 25;
-
-                    return score;
-                }
-
-                function findBestBone(role) {
-                    let best = null;
-                    let bestScore = -Infinity;
-                    for (const bone of allBones) {
-                        const score = scoreBone(bone.name, role);
-                        if (score > bestScore) {
-                            bestScore = score;
-                            best = bone;
-                        }
-                    }
-                    return bestScore > 20 ? best : null;
-                }
-
-                const roleMap = { hips:'hips', spine:'spine', chest:'chest', neck:'neck', head:'head', lshoulder:'lShoulder', rshoulder:'rShoulder', larm:'lArm', rarm:'rArm', lfore:'lFore', rfore:'rFore', lhand:'lHand', rhand:'rHand', leye:'lEye', reye:'rEye' };
-
-                const roles = [
-                    'hips','spine','chest','neck','head',
-                    'lshoulder','rshoulder',
-                    'larm','rarm','lfore','rfore',
-                    'lhand','rhand','leye','reye'
-                ];
-
-                for (const role of roles) {
-                    const bone = findBestBone(role);
-                    if (bone) state.bones[roleMap[role]] = bone;
-                }
-
-                // IMPORTANT: every bone keeps its own ORIGINAL local transform.
-                // This makes timeline rotations independent of the model's bind pose.
-                for (const bone of allBones) {
-                    state.initialBones[bone.uuid] = {
-                        q: bone.quaternion.clone(),
-                        p: bone.position.clone()
+                if (node.isBone) {
+                    allBones.push(node);
+                    state.initialBones[node.uuid] = {
+                        q: node.quaternion.clone(),
+                        p: node.position.clone()
                     };
                 }
-
-                const mapped = Object.entries(state.bones)
-                    .filter(([, b]) => !!b)
-                    .map(([role, b]) => `${role}:${b.name}`)
-                    .join('<br>');
-
-                const required = ['lArm','rArm','lFore','rFore'];
-                const missingRequired = required.filter(k => !state.bones[k]);
-
-                if (missingRequired.length) {
-                    ui.info.innerHTML = `<span class="warning">Model loaded, but arm bones were not mapped.<br>Missing: ${missingRequired.join(', ')}<br><small>${mapped || 'No usable arm skeleton found.'}</small></span>`;
-                } else {
-                    ui.info.innerHTML = `<span class="success">Rig Active — ${Object.keys(state.bones).length} animation bones mapped.<br><small>${mapped}</small></span>`;
-                }
-                ui.centerBtn.disabled = false; centerAndFitModel();
-                ui.rec.disabled = false;
-                window.URL.revokeObjectURL(url);
             });
+
+            function normBoneName(name) {
+                return String(name || '')
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]/g, '');
+            }
+
+            function scoreBone(name, role) {
+                const n = normBoneName(name);
+                const has = (...terms) => terms.some(t => n.includes(t));
+                let score = 0;
+
+                if (role === 'hips') {
+                    if (has('hips', 'pelvis', 'root')) score += 100;
+                }
+                if (role === 'spine') {
+                    if (has('spine')) score += 40;
+                    if (has('chest', 'upperchest')) score -= 30;
+                    if (has('spine1', 'spine2', 'spine3', 'spine4')) score -= 10;
+                }
+                if (role === 'chest') {
+                    if (has('chest', 'upperchest', 'spine2', 'spine3')) score += 80;
+                    if (has('spine')) score += 10;
+                }
+                if (role === 'neck' && has('neck')) score += 100;
+                if (role === 'head' && has('head')) score += 100;
+
+                const lower = name.toLowerCase();
+                const left = /(^|[_\-.])l([_\-.]|$)/.test(lower) || /left/.test(lower) || /(^|[^a-z])l($|[^a-z])/.test(lower);
+                const right = /(^|[_\-.])r([_\-.]|$)/.test(lower) || /right/.test(lower) || /(^|[^a-z])r($|[^a-z])/.test(lower);
+                const isLeft = role.startsWith('l');
+                if (isLeft && !left) score -= 1000;
+                if (!isLeft && role.startsWith('r') && !right) score -= 1000;
+                if (left && isLeft) score += 100;
+                if (right && !isLeft && role.startsWith('r')) score += 100;
+
+                if (role.endsWith('shoulder') && has('shoulder', 'clavicle')) score += 90;
+                if (role.endsWith('arm') && has('upperarm', 'arm')) score += 80;
+                if (role.endsWith('fore') && has('forearm', 'lowerarm', 'elbow')) score += 90;
+                if (role.endsWith('hand') && has('hand', 'wrist')) score += 90;
+                if (role.endsWith('eye') && has('eye')) score += 90;
+
+                // Strongly prefer explicit side words and exact semantic names.
+                if (isLeft && has('left')) score += 30;
+                if (!isLeft && role.startsWith('r') && has('right')) score += 30;
+                if (role.endsWith('arm') && has('upperarm')) score += 25;
+                if (role.endsWith('fore') && has('forearm')) score += 25;
+
+                return score;
+            }
+
+            function findBestBone(role) {
+                let best = null;
+                let bestScore = -Infinity;
+                for (const bone of allBones) {
+                    const score = scoreBone(bone.name, role);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        best = bone;
+                    }
+                }
+                return bestScore > 20 ? best : null;
+            }
+
+            const roleMap = { hips:'hips', spine:'spine', chest:'chest', neck:'neck', head:'head', lshoulder:'lShoulder', rshoulder:'rShoulder', larm:'lArm', rarm:'rArm', lfore:'lFore', rfore:'rFore', lhand:'lHand', rhand:'rHand', leye:'lEye', reye:'rEye' };
+
+            const roles = [
+                'hips','spine','chest','neck','head',
+                'lshoulder','rshoulder',
+                'larm','rarm','lfore','rfore',
+                'lhand','rhand','leye','reye'
+            ];
+
+            for (const role of roles) {
+                const bone = findBestBone(role);
+                if (bone) state.bones[roleMap[role]] = bone;
+            }
+
+            // IMPORTANT: every bone keeps its own ORIGINAL local transform.
+            // This makes timeline rotations independent of the model's bind pose.
+            for (const bone of allBones) {
+                state.initialBones[bone.uuid] = {
+                    q: bone.quaternion.clone(),
+                    p: bone.position.clone()
+                };
+            }
+
+            const mapped = Object.entries(state.bones)
+                .filter(([, b]) => !!b)
+                .map(([role, b]) => `${role}:${b.name}`)
+                .join('<br>');
+
+            const required = ['lArm','rArm','lFore','rFore'];
+            const missingRequired = required.filter(k => !state.bones[k]);
+            const formatTag = formatLabel ? `[${formatLabel}] ` : '';
+
+            if (allBones.length === 0) {
+                ui.info.innerHTML = `<span class="warning">${formatTag}Model loaded, but it has no skeleton/bones — poses and body sway won't animate it. This is expected for STL and many static OBJ files. Lip sync will still work if morph targets are present (${blendshapeCount} found).</span>`;
+            } else if (missingRequired.length) {
+                ui.info.innerHTML = `<span class="warning">${formatTag}Model loaded, but arm bones were not mapped.<br>Missing: ${missingRequired.join(', ')}<br><small>${mapped || 'No usable arm skeleton found.'}</small></span>`;
+            } else {
+                ui.info.innerHTML = `<span class="success">${formatTag}Rig Active — ${Object.keys(state.bones).length} animation bones mapped.<br><small>${mapped}</small></span>`;
+            }
+            ui.centerBtn.disabled = false; centerAndFitModel();
+            ui.rec.disabled = false;
+        }
+
+        // Resolves auxiliary files (.mtl, .bin, textures) selected alongside the
+        // primary model file by filename, so loaders that reference external
+        // resources by relative path can still find them among the blob URLs.
+        function buildResourceManager(fileList) {
+            const blobUrls = {};
+            for (const f of fileList) blobUrls[f.name] = URL.createObjectURL(f);
+            const manager = new THREE.LoadingManager();
+            manager.setURLModifier((url) => {
+                const base = decodeURIComponent(url.split('/').pop().split('\\').pop());
+                if (blobUrls[base]) return blobUrls[base];
+                if (blobUrls[url]) return blobUrls[url];
+                return url;
+            });
+            return { manager, blobUrls };
+        }
+
+        const MODEL_EXTENSIONS = ['glb', 'gltf', 'fbx', 'obj', 'stl'];
+
+        ui.glb.addEventListener('change', async e => {
+            const files = Array.from(e.target.files || []);
+            if (!files.length) return;
+            ui.info.innerHTML = "Parsing Model & Extracting Skeleton...";
+
+            const primaryFile = files.find(f => MODEL_EXTENSIONS.includes(f.name.split('.').pop().toLowerCase()));
+            if (!primaryFile) {
+                ui.info.innerHTML = `<span class="error">No supported model file selected. Please include a .glb, .gltf, .fbx, .obj, or .stl file.</span>`;
+                return;
+            }
+            const ext = primaryFile.name.split('.').pop().toLowerCase();
+            const { manager, blobUrls } = buildResourceManager(files);
+            const primaryUrl = blobUrls[primaryFile.name];
+
+            try {
+                let object3D = null;
+                let formatLabel = ext.toUpperCase();
+
+                if (ext === 'glb' || ext === 'gltf') {
+                    const gltf = await new GLTFLoader(manager).loadAsync(primaryUrl);
+                    object3D = gltf.scene;
+
+                } else if (ext === 'fbx') {
+                    object3D = await new FBXLoader(manager).loadAsync(primaryUrl);
+
+                } else if (ext === 'obj') {
+                    const objLoader = new OBJLoader(manager);
+                    const mtlFile = files.find(f => f.name.toLowerCase().endsWith('.mtl'));
+                    if (mtlFile) {
+                        const mtlLoader = new MTLLoader(manager);
+                        const materials = await mtlLoader.loadAsync(blobUrls[mtlFile.name]);
+                        materials.preload();
+                        objLoader.setMaterials(materials);
+                        formatLabel += ' + MTL';
+                    }
+                    object3D = await objLoader.loadAsync(primaryUrl);
+
+                } else if (ext === 'stl') {
+                    const geometry = await new STLLoader(manager).loadAsync(primaryUrl);
+                    geometry.computeVertexNormals();
+                    const material = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.1, roughness: 0.75 });
+                    object3D = new THREE.Mesh(geometry, material);
+                    object3D.name = 'STL_Mesh';
+
+                } else {
+                    throw new Error(`Unsupported file type: .${ext}`);
+                }
+
+                processLoadedModel(object3D, formatLabel);
+
+            } catch (err) {
+                console.error('Model load failed:', err);
+                ui.info.innerHTML = `<span class="error">Failed to load model (.${ext}): ${err.message}</span>`;
+            }
+            // Blob URLs for aux resources (textures/mtl/bin) are kept alive for the
+            // session since some loaders resolve them lazily after loadAsync resolves.
         });
 
         ui.audio.addEventListener('change', async e => {
