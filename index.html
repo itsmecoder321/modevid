@@ -139,6 +139,24 @@
                 <input type="file" id="audioInput" accept="audio/*">
             </div>
 
+            <!-- Lighting & Color -->
+            <div class="panel-section">
+                <label style="color: var(--accent-color);">💡 Lighting & Color</label>
+                <div class="sub-label" style="margin-top:-2px;">If a model looks dark or dull (common with .fbx/.obj missing textures), adjust these — no Blender needed.</div>
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Model Brightness</label><input type="range" id="modelBrightness" min="0.3" max="3" step="0.05" value="1"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Ambient Light</label><input type="range" id="lightAmbient" min="0" max="3" step="0.1" value="1.2"></div>
+                </div>
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Key Light</label><input type="range" id="lightKey" min="0" max="6" step="0.1" value="2.2"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label">Fill Light</label><input type="range" id="lightFill" min="0" max="4" step="0.1" value="1.0"></div>
+                </div>
+                <div class="control-group" style="margin-top:4px;">
+                    <label class="sub-label">Apply a Texture Image to Model (fixes missing textures)</label>
+                    <input type="file" id="customTextureInput" accept="image/*">
+                </div>
+            </div>
+
             <!-- Positioning -->
             <div class="panel-section">
                 <label style="color: var(--accent-color);">Framing & Positioning</label>
@@ -400,6 +418,7 @@
             silenceThreshold: 0.05,
             bandBins: null,
             waveform: null, // { duration, points(Float32 0-1 rms), voice(Uint8 0/1), pointsPerSecond }
+            modelMaterials: [], // materials on the currently loaded model, tracked for brightness/texture adjustments
             
             blocks: [], // Array of Custom Timeline Poses
             editingBlockId: null,
@@ -415,6 +434,7 @@
             container: document.getElementById('canvas-container'), info: document.getElementById('model-info'),
             mouthAmp: document.getElementById('mouthAmp'), animSway: document.getElementById('animSway'),
             scale: document.getElementById('modScale'), posX: document.getElementById('modPosX'), posY: document.getElementById('modPosY'), posZ: document.getElementById('modPosZ'),
+            modelBrightness: document.getElementById('modelBrightness'), lightAmbient: document.getElementById('lightAmbient'), lightKey: document.getElementById('lightKey'), lightFill: document.getElementById('lightFill'), customTextureInput: document.getElementById('customTextureInput'),
             audioSeek: document.getElementById('audioSeek'), timeCur: document.getElementById('timeCurrent'), timeTot: document.getElementById('timeTotal'),
             waveformCanvas: document.getElementById('waveformCanvas'), waveformWrap: document.getElementById('waveformWrap'), waveformPlayhead: document.getElementById('waveformPlayhead'), waveformEmpty: document.getElementById('waveformEmpty'),
             silenceSensitivity: document.getElementById('silenceSensitivity'), btnAutoFillVoice: document.getElementById('btnAutoFillVoice'),
@@ -1082,18 +1102,74 @@
         renderer.setPixelRatio(1);
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
         ui.container.appendChild(renderer.domElement);
 
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
-        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+        scene.add(ambientLight);
         const keyLight = new THREE.DirectionalLight(0xfffaf0, 2.2);
         keyLight.position.set(5, 5, 5); keyLight.castShadow = true;
         scene.add(keyLight);
-        scene.add(new THREE.DirectionalLight(0xd0e0ff, 1.0)).position.set(-5, 3, 3);
+        const fillLight = new THREE.DirectionalLight(0xd0e0ff, 1.0);
+        fillLight.position.set(-5, 3, 3);
+        scene.add(fillLight);
 
         let currentModel = null, audioContext, analyser, audioBuffer, mediaStreamDest, dataArray;
+
+        // Re-applies the current slider values to lights + model materials. Called
+        // once on load (so a freshly loaded dark FBX immediately reflects whatever
+        // brightness settings are already dialed in) and on every slider change.
+        function applyColorAdjustments() {
+            ambientLight.intensity = parseFloat(ui.lightAmbient.value) || 0;
+            keyLight.intensity = parseFloat(ui.lightKey.value) || 0;
+            fillLight.intensity = parseFloat(ui.lightFill.value) || 0;
+
+            const boost = parseFloat(ui.modelBrightness.value) || 1;
+            for (const mat of state.modelMaterials) {
+                if (mat.color && mat.userData.__origColor) {
+                    mat.color.copy(mat.userData.__origColor).multiplyScalar(boost);
+                }
+                mat.needsUpdate = true;
+            }
+        }
+
+        [ui.lightAmbient, ui.lightKey, ui.lightFill, ui.modelBrightness].forEach(input => {
+            input.addEventListener('input', applyColorAdjustments);
+        });
+
+        // Manually assign an image as the diffuse/color map on every material of the
+        // currently loaded model — a direct fix for FBX/OBJ files whose textures
+        // weren't included or didn't resolve.
+        ui.customTextureInput.addEventListener('change', (e) => {
+            const file = e.target.files?.[0];
+            if (!file || !currentModel) {
+                if (!currentModel) alert('Load a model first, then apply a texture to it.');
+                return;
+            }
+            const url = URL.createObjectURL(file);
+            new THREE.TextureLoader().load(url, (texture) => {
+                texture.colorSpace = THREE.SRGBColorSpace;
+                texture.needsUpdate = true;
+                for (const mat of state.modelMaterials) {
+                    mat.map = texture;
+                    // A flat white base color lets the texture show at full, true color.
+                    if (mat.color) {
+                        mat.color.setRGB(1, 1, 1);
+                        mat.userData.__origColor = mat.color.clone();
+                    }
+                    mat.needsUpdate = true;
+                }
+                applyColorAdjustments();
+                ui.info.innerHTML = `<span class="success">Texture applied to ${state.modelMaterials.length} material(s).</span>`;
+            }, undefined, (err) => {
+                console.error('Texture load failed:', err);
+                alert('Could not load that image as a texture.');
+            });
+            e.target.value = '';
+        });
 
         function resize() {
             const parent = ui.container.parentElement;
@@ -1244,6 +1320,42 @@
                 };
             }
 
+            // FIX: textures loaded via FBXLoader/OBJLoader/MTLLoader are left in
+            // linear color space by default (TextureLoader doesn't set sRGB for
+            // you). GLTFLoader sets this correctly per the glTF spec, which is
+            // exactly why .glb never has this problem but .fbx/.obj often looks
+            // dark/desaturated. Force sRGB on every color-carrying map found.
+            let fixedTextureCount = 0;
+            currentModel.traverse(node => {
+                if (!node.isMesh || !node.material) return;
+                const mats = Array.isArray(node.material) ? node.material : [node.material];
+                for (const mat of mats) {
+                    for (const slot of ['map', 'emissiveMap']) {
+                        if (mat[slot] && mat[slot].colorSpace !== THREE.SRGBColorSpace) {
+                            mat[slot].colorSpace = THREE.SRGBColorSpace;
+                            mat[slot].needsUpdate = true;
+                            fixedTextureCount++;
+                        }
+                    }
+                    mat.needsUpdate = true;
+                }
+            });
+            state.modelMaterials = [];
+            currentModel.traverse(node => {
+                if (node.isMesh && node.material) {
+                    const mats = Array.isArray(node.material) ? node.material : [node.material];
+                    for (const mat of mats) {
+                        if (!state.modelMaterials.includes(mat)) {
+                            state.modelMaterials.push(mat);
+                            if (!mat.userData.__origColor) {
+                                mat.userData.__origColor = mat.color ? mat.color.clone() : null;
+                            }
+                        }
+                    }
+                }
+            });
+            applyColorAdjustments();
+
             const mapped = Object.entries(state.bones)
                 .filter(([, b]) => !!b)
                 .map(([role, b]) => `${role}:${b.name}`)
@@ -1252,13 +1364,14 @@
             const required = ['lArm','rArm','lFore','rFore'];
             const missingRequired = required.filter(k => !state.bones[k]);
             const formatTag = formatLabel ? `[${formatLabel}] ` : '';
+            const textureNote = fixedTextureCount > 0 ? ` (corrected color-space on ${fixedTextureCount} texture map${fixedTextureCount > 1 ? 's' : ''})` : '';
 
             if (allBones.length === 0) {
-                ui.info.innerHTML = `<span class="warning">${formatTag}Model loaded, but it has no skeleton/bones — poses and body sway won't animate it. This is expected for STL and many static OBJ files. Lip sync will still work if morph targets are present (${blendshapeCount} found).</span>`;
+                ui.info.innerHTML = `<span class="warning">${formatTag}Model loaded, but it has no skeleton/bones — poses and body sway won't animate it. This is expected for STL and many static OBJ files. Lip sync will still work if morph targets are present (${blendshapeCount} found).${textureNote}</span>`;
             } else if (missingRequired.length) {
-                ui.info.innerHTML = `<span class="warning">${formatTag}Model loaded, but arm bones were not mapped.<br>Missing: ${missingRequired.join(', ')}<br><small>${mapped || 'No usable arm skeleton found.'}</small></span>`;
+                ui.info.innerHTML = `<span class="warning">${formatTag}Model loaded, but arm bones were not mapped.<br>Missing: ${missingRequired.join(', ')}<br><small>${mapped || 'No usable arm skeleton found.'}</small></span>${textureNote}`;
             } else {
-                ui.info.innerHTML = `<span class="success">${formatTag}Rig Active — ${Object.keys(state.bones).length} animation bones mapped.<br><small>${mapped}</small></span>`;
+                ui.info.innerHTML = `<span class="success">${formatTag}Rig Active — ${Object.keys(state.bones).length} animation bones mapped.<br><small>${mapped}</small></span>${textureNote}`;
             }
             ui.centerBtn.disabled = false; centerAndFitModel();
             ui.rec.disabled = false;
