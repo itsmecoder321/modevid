@@ -188,6 +188,23 @@
                 </div>
                 <button id="btnRecord" disabled style="margin-top: 8px;">Record & Export Video</button>
             </div>
+
+            <!-- Motion & Realism -->
+            <div class="panel-section">
+                <label style="color: var(--accent-color);">🎛 Motion & Realism Controls</label>
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;"><label class="sub-label" title="Scales how far every pose reaches from rest — turn down for subtle, up for exaggerated">Pose Intensity</label><input type="range" id="poseIntensity" min="0.2" max="1.6" step="0.05" value="1"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label" title="Speed of breathing/sway/idle-nod cycles">Idle Motion Speed</label><input type="range" id="idleSpeed" min="0.3" max="2" step="0.05" value="1"></div>
+                </div>
+                <div class="row-group">
+                    <div class="control-group" style="flex:1;"><label class="sub-label" title="How often the avatar blinks — higher = more frequent">Blink Frequency</label><input type="range" id="blinkFrequency" min="0.3" max="2.5" step="0.05" value="1"></div>
+                    <div class="control-group" style="flex:1;"><label class="sub-label" title="How far the eyes wander/saccade">Eye Movement</label><input type="range" id="eyeMovement" min="0" max="2" step="0.05" value="1"></div>
+                </div>
+                <div class="control-group">
+                    <label class="sub-label" title="Default crossfade time when switching between two timeline blocks (each block can override this — see Timeline tab)">Default Block Transition (s)</label>
+                    <input type="range" id="globalTransitionTime" min="0" max="1.5" step="0.05" value="0.4">
+                </div>
+            </div>
         </div>
 
         <!-- TAB 2: TIMELINE & POSE EDITOR -->
@@ -199,6 +216,7 @@
                     <div class="control-group" style="flex: 1;"><label class="sub-label">Start (s)</label><input type="number" id="tlStart" min="0" step="0.1" value="0.0"></div>
                     <div class="control-group" style="flex: 1;"><label class="sub-label">End (s)</label><input type="number" id="tlEnd" min="0.1" step="0.1" value="3.0"></div>
                     <div class="control-group" style="flex: 1;"><label class="sub-label" title="When two blocks overlap, the higher priority one plays. Default 0.">Priority</label><input type="number" id="tlPriority" step="1" value="0"></div>
+                    <div class="control-group" style="flex: 1;"><label class="sub-label" title="Crossfade time when entering this block. Leave blank to use the global default.">Transition (s)</label><input type="number" id="tlTransition" min="0" step="0.05" placeholder="default"></div>
                 </div>
                 <div class="row-group" style="margin-top: 5px;">
                     <div class="control-group" style="flex: 2;">
@@ -423,7 +441,14 @@
             blocks: [], // Array of Custom Timeline Poses
             editingBlockId: null,
             editingBatchId: null, // when set, pose slider edits apply to EVERY block sharing this batchId at once
-            smoothPose: { ...BaseRest } 
+            smoothPose: { ...BaseRest },
+
+            // Block-to-block crossfade system
+            lastActiveBlockId: undefined, // undefined = not yet established (first frame)
+            transitioning: false,
+            transitionFrom: { ...BaseRest },
+            transitionStart: 0,
+            transitionDuration: 0.4
         };
 
         const ui = {
@@ -439,7 +464,8 @@
             waveformCanvas: document.getElementById('waveformCanvas'), waveformWrap: document.getElementById('waveformWrap'), waveformPlayhead: document.getElementById('waveformPlayhead'), waveformEmpty: document.getElementById('waveformEmpty'),
             silenceSensitivity: document.getElementById('silenceSensitivity'), btnAutoFillVoice: document.getElementById('btnAutoFillVoice'),
             
-            tlStart: document.getElementById('tlStart'), tlEnd: document.getElementById('tlEnd'), tlPreset: document.getElementById('tlPreset'), tlPriority: document.getElementById('tlPriority'),
+            tlStart: document.getElementById('tlStart'), tlEnd: document.getElementById('tlEnd'), tlPreset: document.getElementById('tlPreset'), tlPriority: document.getElementById('tlPriority'), tlTransition: document.getElementById('tlTransition'),
+            poseIntensity: document.getElementById('poseIntensity'), idleSpeed: document.getElementById('idleSpeed'), blinkFrequency: document.getElementById('blinkFrequency'), eyeMovement: document.getElementById('eyeMovement'), globalTransitionTime: document.getElementById('globalTransitionTime'),
             btnExportTimeline: document.getElementById('btnExportTimeline'), btnImportTimeline: document.getElementById('btnImportTimeline'), importTimelineFile: document.getElementById('importTimelineFile'),
             btnAddBlock: document.getElementById('btnAddBlock'), tlList: document.getElementById('timelineList'),
             tabs: document.querySelectorAll('.tab-btn'), tabContents: document.querySelectorAll('.tab-content'),
@@ -460,7 +486,11 @@
         window.updateBlockTime = function(id, type, value) {
             const block = state.blocks.find(b => b.id === id);
             if (block) {
-                block[type] = parseFloat(value);
+                if (type === 'transitionTime' && (value === '' || value === null)) {
+                    delete block.transitionTime; // blank = fall back to the global default
+                } else {
+                    block[type] = parseFloat(value);
+                }
                 renderTimeline();
             }
         };
@@ -518,9 +548,13 @@
                 const batchBadge = block.batchId
                     ? `<span style="font-size:0.75em; padding:1px 6px; border-radius:3px; margin-left:6px; background:#6c757d; color:white;" title="Part of a batch — use Tune All above to edit the whole group at once">🔗</span>`
                     : '';
+                const hasCustomTransition = Number.isFinite(block.transitionTime);
+                const transitionBadge = hasCustomTransition
+                    ? `<span style="font-size:0.75em; padding:1px 6px; border-radius:3px; margin-left:6px; background:#007bff; color:white;">⤳${block.transitionTime}s</span>`
+                    : '';
                 div.innerHTML = `
                     <div class="tl-header">
-                        <b>${block.label}${priorityBadge}${batchBadge}</b>
+                        <b>${block.label}${priorityBadge}${batchBadge}${transitionBadge}</b>
                         <div class="tl-actions">
                             <button class="tl-btn tl-edit" id="edit-${block.id}">${isEditing ? 'Tuning...' : 'Tune'}</button>
                             <button class="tl-btn tl-copy" id="values-${block.id}" style="background:#b8860b;">Values</button>
@@ -535,6 +569,8 @@
                         <input type="number" class="time-input" value="${block.end.toFixed(1)}" step="0.1" onchange="window.updateBlockTime(${block.id}, 'end', this.value)">
                         <label class="sub-label" style="margin:0;" title="When two blocks overlap, higher priority wins.">Priority:</label>
                         <input type="number" class="time-input" value="${priority}" step="1" onchange="window.updateBlockTime(${block.id}, 'priority', this.value)">
+                        <label class="sub-label" style="margin:0;" title="Crossfade time entering this block. Blank = use global default.">Transition:</label>
+                        <input type="number" class="time-input" value="${hasCustomTransition ? block.transitionTime : ''}" step="0.05" min="0" placeholder="default" onchange="window.updateBlockTime(${block.id}, 'transitionTime', this.value)">
                     </div>
                 `;
                 
@@ -557,6 +593,7 @@
                 document.getElementById(`copy-${block.id}`).onclick = () => {
                     const duration = block.end - block.start;
                     const newBlock = { id: Date.now(), start: block.end, end: block.end + duration, label: block.label, priority: block.priority || 0, batchId: block.batchId || null, customPose: JSON.parse(JSON.stringify(block.customPose)) };
+                    if (Number.isFinite(block.transitionTime)) newBlock.transitionTime = block.transitionTime;
                     state.blocks.push(newBlock);
                     ui.tlStart.value = newBlock.end.toFixed(1); ui.tlEnd.value = (newBlock.end + duration).toFixed(1);
                     renderTimeline();
@@ -578,8 +615,13 @@
             const label = ui.tlPreset.options[ui.tlPreset.selectedIndex].text;
             const customPose = { ...PoseLibrary[presetId] }; 
             const priority = parseInt(ui.tlPriority.value, 10) || 0;
-            
-            state.blocks.push({ id: Date.now(), start, end, label, priority, customPose });
+            const newBlock = { id: Date.now(), start, end, label, priority, customPose };
+            const transitionVal = ui.tlTransition.value;
+            if (transitionVal !== '' && Number.isFinite(parseFloat(transitionVal))) {
+                newBlock.transitionTime = Math.max(0, parseFloat(transitionVal));
+            }
+
+            state.blocks.push(newBlock);
             ui.tlStart.value = end.toFixed(1);
             ui.tlEnd.value = (end + (end - start)).toFixed(1);
             renderTimeline();
@@ -599,7 +641,7 @@
             }
             const payload = {
                 schema: 'avatar-keyframer-timeline',
-                version: 3, // v3 adds batchId (for Tune All groups)
+                version: 4, // v4 adds per-block transitionTime override
                 exportedAt: new Date().toISOString(),
                 blocks: state.blocks.map(b => ({
                     start: b.start,
@@ -607,6 +649,7 @@
                     label: b.label,
                     priority: Number.isFinite(b.priority) ? b.priority : 0,
                     batchId: b.batchId || null,
+                    transitionTime: Number.isFinite(b.transitionTime) ? b.transitionTime : null,
                     customPose: b.customPose
                 }))
             };
@@ -655,6 +698,7 @@
                         label: typeof raw.label === 'string' && raw.label ? raw.label : 'Imported Pose',
                         priority: Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 0, // older exports (v1) had no priority -> defaults to 0
                         batchId: typeof raw.batchId === 'string' && raw.batchId ? raw.batchId : null, // older exports (v1/v2) had no batchId -> ungrouped
+                        ...(Number.isFinite(Number(raw.transitionTime)) ? { transitionTime: Number(raw.transitionTime) } : {}), // older exports (v1-v3) had none -> use global default
                         customPose
                     });
                 }
@@ -981,12 +1025,17 @@
 
         function applyTimelinePoseInstant(time) {
             const targetPose = getTargetPoseAtTime(time);
+            const poseIntensity = (ui.poseIntensity && parseFloat(ui.poseIntensity.value)) || 1;
             for (const key of Object.keys(state.smoothPose)) {
-                const value = targetPose[key] !== undefined && Number.isFinite(Number(targetPose[key]))
+                const raw = targetPose[key] !== undefined && Number.isFinite(Number(targetPose[key]))
                     ? Number(targetPose[key])
-                    : 0;
-                state.smoothPose[key] = value;
+                    : (BaseRest[key] || 0);
+                const base = BaseRest[key] || 0;
+                state.smoothPose[key] = base + (raw - base) * poseIntensity;
             }
+            // Any pending crossfade is now moot — the pose was just set directly.
+            state.transitioning = false;
+            state.lastActiveBlockId = undefined;
         }
 
         function seekAudio(time) {
@@ -1686,25 +1735,67 @@
 
             // --- 1. DETERMINE TARGET POSE & LERP ---
             const poseClock = state.isPlaying ? state.timelineClock : state.audioTime;
-            const targetPose = getTargetPoseAtTime(poseClock);
+            const activeBlockNow = getActiveBlockAtTime(poseClock);
+            const rawTargetPose = getTargetPoseAtTime(poseClock);
+
+            // Apply global Pose Intensity: scales each axis's distance from BaseRest,
+            // so gestures can be dialed subtler or more exaggerated without retuning
+            // every individual block.
+            const poseIntensity = parseFloat(ui.poseIntensity.value) || 1;
+            const targetPose = {};
+            for (const key in BaseRest) {
+                const raw = rawTargetPose[key] !== undefined && Number.isFinite(Number(rawTargetPose[key])) ? Number(rawTargetPose[key]) : BaseRest[key];
+                targetPose[key] = BaseRest[key] + (raw - BaseRest[key]) * poseIntensity;
+            }
 
             // Debug/diagnostic state: this makes it obvious whether playback
             // is actually inside a timeline block.
             if (state.isPlaying && currentModel && ui.info) {
-                const active = getActiveBlockAtTime(poseClock);
-                ui.info.dataset.playback = active
-                    ? `PLAYING ${active.label} @ ${poseClock.toFixed(2)}s`
+                ui.info.dataset.playback = activeBlockNow
+                    ? `PLAYING ${activeBlockNow.label} @ ${poseClock.toFixed(2)}s`
                     : `PLAYING REST @ ${poseClock.toFixed(2)}s`;
             }
 
-            const poseSmoothing = state.isPlaying ? 12.0 : 24.0;
-            const poseAlpha = Math.min(1, delta * poseSmoothing);
+            // ========================================================
+            // BLOCK-TO-BLOCK CROSSFADE
+            // Detect when the active block actually changes (including changes
+            // caused by priority resolution) and run a deterministic, eased
+            // transition over a configurable duration instead of an indefinite
+            // exponential smoothing chase. Each block can override the duration;
+            // otherwise the global "Default Block Transition" slider applies.
+            // ========================================================
+            const activeIdNow = activeBlockNow ? activeBlockNow.id : null;
+            if (state.lastActiveBlockId === undefined) {
+                state.lastActiveBlockId = activeIdNow; // first frame: establish baseline, no fade
+            } else if (activeIdNow !== state.lastActiveBlockId) {
+                state.transitionFrom = { ...state.smoothPose };
+                state.transitionStart = poseClock;
+                const override = activeBlockNow && Number.isFinite(activeBlockNow.transitionTime) ? activeBlockNow.transitionTime : null;
+                state.transitionDuration = override !== null ? override : (parseFloat(ui.globalTransitionTime.value) || 0.4);
+                state.transitioning = true;
+                state.lastActiveBlockId = activeIdNow;
+            }
 
-            for (let key in state.smoothPose) {
-                const tgt = targetPose[key] !== undefined && Number.isFinite(Number(targetPose[key]))
-                    ? Number(targetPose[key])
-                    : 0;
-                state.smoothPose[key] = THREE.MathUtils.lerp(state.smoothPose[key], tgt, poseAlpha);
+            if (state.transitioning) {
+                const elapsed = poseClock - state.transitionStart;
+                const dur = Math.max(0.01, state.transitionDuration);
+                let f = THREE.MathUtils.clamp(elapsed / dur, 0, 1);
+                f = f * f * (3 - 2 * f); // smoothstep easing — gentle start and end, no jerk
+                for (const key in state.smoothPose) {
+                    const from = state.transitionFrom[key] !== undefined ? state.transitionFrom[key] : 0;
+                    const to = targetPose[key] !== undefined ? targetPose[key] : 0;
+                    state.smoothPose[key] = THREE.MathUtils.lerp(from, to, f);
+                }
+                if (f >= 1) state.transitioning = false;
+            } else {
+                // Safety-net smoothing for cases outside block transitions (e.g. live
+                // slider edits while Tuning/Tune-All mid-block) — same gentle chase as before.
+                const poseSmoothing = state.isPlaying ? 12.0 : 24.0;
+                const poseAlpha = Math.min(1, delta * poseSmoothing);
+                for (const key in state.smoothPose) {
+                    const tgt = targetPose[key] !== undefined ? targetPose[key] : 0;
+                    state.smoothPose[key] = THREE.MathUtils.lerp(state.smoothPose[key], tgt, poseAlpha);
+                }
             }
 
             if (currentModel) {
@@ -1726,6 +1817,9 @@
                 // must always advance every frame regardless of that clamp.
                 const t = state.isPlaying ? state.timelineClock : state.time;
                 const swayAmp = parseFloat(ui.animSway.value) || 1.0;
+                const idleSpeed = parseFloat(ui.idleSpeed.value) || 1.0;
+                const blinkFreq = parseFloat(ui.blinkFrequency.value) || 1.0;
+                const eyeMove = parseFloat(ui.eyeMovement.value) || 1.0;
 
                 // Eyes & Blinking
                 state.blinkTimer += delta;
@@ -1733,12 +1827,12 @@
                     const bp = state.blinkTimer - state.nextBlinkTime;
                     if (bp < 0.05) state.isBlinkingNow = bp / 0.05; 
                     else if (bp < 0.15) state.isBlinkingNow = 1.0 - ((bp - 0.05) / 0.10); 
-                    else { state.isBlinkingNow = 0; state.blinkTimer = 0; state.nextBlinkTime = Math.random() * 4.0 + 2.0; }
+                    else { state.isBlinkingNow = 0; state.blinkTimer = 0; state.nextBlinkTime = (Math.random() * 4.0 + 2.0) / blinkFreq; }
                 }
 
                 if (t > state.nextSaccadeTime) {
-                    state.eyeTarget.x = (Math.random() - 0.5) * 0.4;
-                    state.eyeTarget.y = (Math.random() - 0.5) * 0.2;
+                    state.eyeTarget.x = (Math.random() - 0.5) * 0.4 * eyeMove;
+                    state.eyeTarget.y = (Math.random() - 0.5) * 0.2 * eyeMove;
                     state.nextSaccadeTime = t + Math.random() * 2.5 + 0.5;
                 }
                 state.currentEyePos.lerp(state.eyeTarget, 0.1);
@@ -1748,17 +1842,17 @@
 
                 // Core Body Sway
                 if (state.bones.hips) {
-                    const shiftX = Math.sin(t * 0.4) * 0.015 * swayAmp;
+                    const shiftX = Math.sin(t * 0.4 * idleSpeed) * 0.015 * swayAmp;
                     setBoneAbsolute(state.bones.hips, 0,0,0);
                     applyAdditiveProcedural(state.bones.hips, 0, 0, -shiftX * 2);
                 }
 
-                const breath = Math.sin(t * 1.8) * 0.015 * swayAmp;
-                const swayX = Math.sin(t * 0.4) * 0.03 * swayAmp;
+                const breath = Math.sin(t * 1.8 * idleSpeed) * 0.015 * swayAmp;
+                const swayX = Math.sin(t * 0.4 * idleSpeed) * 0.03 * swayAmp;
                 setBoneAbsolute(state.bones.spine, 0,0,0); applyAdditiveProcedural(state.bones.spine, breath, 0, swayX);
                 setBoneAbsolute(state.bones.chest, 0,0,0); applyAdditiveProcedural(state.bones.chest, breath * 1.5, 0, swayX * 0.5);
 
-                const nod = ((Math.sin(t * 3) * 0.03 * talk) + (breath * 0.5));
+                const nod = ((Math.sin(t * 3 * idleSpeed) * 0.03 * talk) + (breath * 0.5));
                 setBoneAbsolute(state.bones.neck, 0,0,0); applyAdditiveProcedural(state.bones.neck, nod + state.currentEyePos.y * 0.2, state.currentEyePos.x * 0.3, -swayX);
                 setBoneAbsolute(state.bones.head, 0,0,0); applyAdditiveProcedural(state.bones.head, nod + state.currentEyePos.y * 0.3, state.currentEyePos.x * 0.4, 0);
             }
