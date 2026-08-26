@@ -434,6 +434,7 @@
             // Spectral viseme state (advanced lip sync)
             visemeOpen: 0, visemeRound: 0, visemeWide: 0,
             silenceThreshold: 0.05,
+            realtimeEnergyPeak: 0.01, // adaptive running peak of real-time band energy, used to make silence gating scale-invariant
             bandBins: null,
             waveform: null, // { duration, points(Float32 0-1 rms), voice(Uint8 0/1), pointsPerSecond }
             modelMaterials: [], // materials on the currently loaded model, tracked for brightness/texture adjustments
@@ -1065,6 +1066,8 @@
             const duration = getTimelineDuration();
             if (duration <= 0) return;
 
+            state.realtimeEnergyPeak = 0.01; // fresh adaptive baseline for this playback run
+
             if (state.audioTime >= duration - 0.02) {
                 state.audioTime = 0;
             }
@@ -1695,9 +1698,15 @@
             //   visemeOpen  — low+mid energy  -> open youth vowels ("ah","eh")
             //   visemeRound — low dominance    -> rounded vowels ("oh","oo")
             //   visemeWide  — high dominance   -> sibilants/wide sounds ("s","ee")
-            // Below state.silenceThreshold (tunable via the waveform slider),
-            // everything gates to 0 so the mouth sits closed during silence
-            // instead of idling/mumbling.
+            // Below state.silenceThreshold, everything gates to 0 so the mouth
+            // sits closed during silence instead of idling/staying open.
+            // NOTE: silenceThreshold is also used by the offline waveform view,
+            // which measures a totally different thing (time-domain RMS amplitude
+            // normalized to that file's own peak). To make one threshold value
+            // meaningful for both, real-time band energy is normalized against
+            // its own adaptive running peak below — so "0.05" means the same
+            // thing ("5% of the loudest level heard") in both places instead of
+            // silence rarely registering here and leaving the mouth stuck open.
             // ========================================================
             let isSilentNow = true;
             if (state.isPlaying && analyser) {
@@ -1713,14 +1722,20 @@
                 highE /= (Math.max(1, bb.highEnd - bb.highStart) * 255);
 
                 const totalE = (lowE + midE + highE) / 3;
-                isSilentNow = totalE < state.silenceThreshold;
 
-                const openTarget = isSilentNow ? 0 : Math.min(1, lowE * 0.8 + midE * 1.1);
+                // Adaptive peak: rises instantly on louder frames, decays slowly
+                // otherwise, so it tracks "loudest level recently" without needing
+                // to know the whole file's loudness in advance.
+                state.realtimeEnergyPeak = Math.max(totalE, state.realtimeEnergyPeak * 0.995);
+                const normEnergy = totalE / Math.max(state.realtimeEnergyPeak, 0.001);
+                isSilentNow = normEnergy < state.silenceThreshold;
+
+                const openTarget = isSilentNow ? 0 : Math.min(1, lowE * 0.7 + midE * 1.0);
                 const roundTarget = isSilentNow ? 0 : Math.min(1, lowE / (lowE + highE + 0.05));
                 const wideTarget = isSilentNow ? 0 : Math.min(1, (highE / (midE + highE + 0.05)) * 0.85);
 
                 // Snap closed quickly on silence, open more fluidly on speech.
-                const openAlpha = isSilentNow ? 0.5 : 0.35;
+                const openAlpha = isSilentNow ? 0.55 : 0.35;
                 state.visemeOpen = THREE.MathUtils.lerp(state.visemeOpen, openTarget, openAlpha);
                 state.visemeRound = THREE.MathUtils.lerp(state.visemeRound, roundTarget, 0.25);
                 state.visemeWide = THREE.MathUtils.lerp(state.visemeWide, wideTarget, 0.25);
@@ -2028,6 +2043,7 @@
 
                 state.audioTime = 0;
                 state.timelineClock = 0;
+                state.realtimeEnergyPeak = 0.01;
                 state.isPlaying = true;
                 applyTimelinePoseInstant(0);
 
