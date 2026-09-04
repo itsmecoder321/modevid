@@ -315,6 +315,19 @@ canvas { display:block; width:100% !important; height:100% !important; }
     </div>
 
     <div class="panel-section">
+      <label style="color:var(--accent-color);">🎚 Voice vs Silence Detection</label>
+      <div class="sub-label" style="margin-top:-2px;">Separate from the waveform preview slider up top — this one controls what counts as "talking" during actual playback/export. Raise it if quiet room-tone or breath noise is still triggering mouth movement; lower it if quieter speech is being treated as silence.</div>
+      <div class="control-group">
+        <label class="sub-label" title="% of the loudest recent level below which audio counts as silence for lip-sync purposes">Voice Detection Sensitivity</label>
+        <input type="range" id="voiceSilenceThreshold" min="0.01" max="0.4" step="0.005" value="0.05">
+      </div>
+      <div class="control-group">
+        <label class="sub-label" title="How fast the 'loudest recently heard' reference level adapts. Lower = steadier (better for consistent narration); higher = reacts faster to volume changes (better for uneven mic levels)">Adaptive Level Tracking</label>
+        <input type="range" id="peakAdaptSpeed" min="0.98" max="0.999" step="0.001" value="0.995">
+      </div>
+    </div>
+
+    <div class="panel-section">
       <label style="color:var(--accent-color);">🤐 Silence / Mouth Closure</label>
       <div class="sub-label" style="margin-top:-2px;">Controls what happens to the mouth in gaps between words — this is what was leaving teeth/half-open mouth visible during silence.</div>
       <div class="control-group">
@@ -537,6 +550,7 @@ const ui = {
   consonantSnap:document.getElementById('consonantSnap'), visemeHold:document.getElementById('visemeHold'),
   roundWideBalance:document.getElementById('roundWideBalance'), lipLag:document.getElementById('lipLag'),
   silenceCloseDelay:document.getElementById('silenceCloseDelay'), silenceCloseSpeed:document.getElementById('silenceCloseSpeed'), closeSnapThreshold:document.getElementById('closeSnapThreshold'),
+  voiceSilenceThreshold:document.getElementById('voiceSilenceThreshold'), peakAdaptSpeed:document.getElementById('peakAdaptSpeed'),
   smileBaseline:document.getElementById('smileBaseline'), browEmphasis:document.getElementById('browEmphasis'),
   eyeContactBias:document.getElementById('eyeContactBias'),
 
@@ -846,6 +860,7 @@ async function computeAndDrawWaveform(audioBuffer) {
   const suggested = THREE.MathUtils.clamp(noiseFloor + (1-noiseFloor)*0.10, 0.02, 0.2);
   ui.silenceSensitivity.value = suggested.toFixed(3);
   state.silenceThreshold = suggested;
+  if (ui.voiceSilenceThreshold) ui.voiceSilenceThreshold.value = suggested.toFixed(3);
   state.waveform = { duration, points:norm, pointsPerSecond, voice:computeVoiceMask(norm,pointsPerSecond,suggested) };
   if (ui.waveformEmpty) ui.waveformEmpty.style.display = 'none';
   drawWaveform();
@@ -1361,9 +1376,11 @@ function animateFrame() {
     midE /= (Math.max(1, bb.midEnd-bb.midStart) * 255);
     highE /= (Math.max(1, bb.highEnd-bb.highStart) * 255);
     const totalE = (lowE+midE+highE)/3;
-    state.realtimeEnergyPeak = Math.max(totalE, state.realtimeEnergyPeak*0.995);
+    const peakAdapt = parseFloat(ui.peakAdaptSpeed.value) || 0.995;
+    state.realtimeEnergyPeak = Math.max(totalE, state.realtimeEnergyPeak*peakAdapt);
     const normEnergy = totalE / Math.max(state.realtimeEnergyPeak, 0.001);
-    isSilentNow = normEnergy < state.silenceThreshold;
+    const realtimeThreshold = parseFloat(ui.voiceSilenceThreshold.value) || 0.05;
+    isSilentNow = normEnergy < realtimeThreshold;
     state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, isSilentNow ? 0 : totalE, 0.18);
   } else {
     state.speechEnergy = THREE.MathUtils.lerp(state.speechEnergy, 0, 0.1);
