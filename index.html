@@ -1428,12 +1428,16 @@ function animateFrame() {
       if (state.jawEnv < closeSnap) state.jawEnv = 0;
       if (state.lipLagOpen < closeSnap) state.lipLagOpen = 0;
     } else {
-      // Hold/hysteresis: don't let the target change again until the hold window
-      // elapses — removes rapid re-triggering that reads as a "squeeze/twitch".
+      // Hold/hysteresis: gates re-opening (rising target) behind the hold window so
+      // rapid energy jitter doesn't flicker the mouth back open — but closing
+      // (falling target, e.g. word gaps and bilabial m/b/p closures) is NEVER
+      // gated, so the lips can still fully touch between syllables while talking
+      // continues. This was the fix for lips not touching during continuous speech.
       state.jawHoldTimer -= delta*1000;
-      if (state.jawHoldTimer <= 0 || Math.abs(jawTarget - state.jawHeld) > 0.35) {
+      const closingNow = jawTarget < state.jawHeld;
+      if (closingNow || state.jawHoldTimer <= 0 || Math.abs(jawTarget - state.jawHeld) > 0.35) {
         state.jawHeld = jawTarget;
-        state.jawHoldTimer = holdMs;
+        if (!closingNow) state.jawHoldTimer = holdMs;
       }
       // Attack/decay envelope: fast up, slow down.
       const rising = state.jawHeld > state.jawEnv;
@@ -1442,6 +1446,13 @@ function animateFrame() {
       // Lips trail the jaw by a small first-order lag (follow-through).
       const lipAlpha = Math.min(1, delta/lipLagT);
       state.lipLagOpen = THREE.MathUtils.lerp(state.lipLagOpen, state.jawEnv, lipAlpha);
+      // Snap fully shut on close approaches to 0 even mid-speech (not just during
+      // confirmed silence) — otherwise the lerp only ever asymptotes toward the
+      // target and the lips visibly never quite touch between syllables.
+      if (state.jawHeld < closeSnap*1.5) {
+        if (state.jawEnv < closeSnap) state.jawEnv = 0;
+        if (state.lipLagOpen < closeSnap) state.lipLagOpen = 0;
+      }
     }
 
     // Round vs Wide are computed then normalized so they never fight each other.
